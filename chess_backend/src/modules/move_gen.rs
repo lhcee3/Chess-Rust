@@ -1,4 +1,4 @@
-use crate::board::{Board, Piece, Color, PieceType};
+use crate::board::{Board, Color, PieceType};
 
 pub fn generate_moves(board: &Board, rank: usize, file: usize) -> Vec<(usize, usize)> {
     let mut moves = Vec::new();
