@@ -1,0 +1,1 @@
+C:\codec\Chess\chess_backend\target\debug\libchess_backend.rlib: C:\codec\Chess\chess_backend\src\lib.rs C:\codec\Chess\chess_backend\src\modules\board.rs C:\codec\Chess\chess_backend\src\modules\engine.rs C:\codec\Chess\chess_backend\src\modules\mod.rs C:\codec\Chess\chess_backend\src\modules\move_gen.rs C:\codec\Chess\chess_backend\src\modules\uci.rs
