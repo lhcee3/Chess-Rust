@@ -1,188 +1,269 @@
-use crate::board::{Board, Color, PieceType};
+use crate::board::{
+    Board, Color, PieceType, Piece, Move, CastlingRights,
+    square_index, rank_and_file,
+};
 
-pub fn generate_moves(board: &Board, rank: usize, file: usize) -> Vec<(usize, usize)> {
+pub fn generate_moves(
+    board: &Board,
+    square: usize,
+    color: Color,
+    en_passant_target: Option<usize>,
+    castling_rights: CastlingRights,
+) -> Vec<Move> {
     let mut moves = Vec::new();
+    let Some(piece) = board.pieces[square] else { return moves; };
+    if piece.color != color { return moves; }
 
-    if rank > 7 || file > 7 {
-        return moves;
-    }
-
-    let piece_option = board.get_piece(rank, file);
-    if piece_option.is_none() {
-        return moves;
-    }
-    let piece = piece_option.unwrap();
+    let (rank, file) = rank_and_file(square);
 
     match piece.piece_type {
-        PieceType::Pawn => {
-            generate_pawn_moves(board, rank, file, piece.color, &mut moves);
-        }
-        PieceType::Rook => {
-            generate_rook_moves(board, rank, file, piece.color, &mut moves);
-        }
-        PieceType::Knight => {
-            generate_knight_moves(board, rank, file, piece.color, &mut moves);
-        }
-        PieceType::Bishop => {
-            generate_bishop_moves(board, rank, file, piece.color, &mut moves);
-        }
-        PieceType::Queen => {
-            generate_queen_moves(board, rank, file, piece.color, &mut moves);
-        }
+        PieceType::Pawn => generate_pawn_moves(board, square, rank, file, color, en_passant_target, &mut moves),
+        PieceType::Knight => generate_knight_moves(board, square, rank, file, color, &mut moves),
+        PieceType::Bishop => generate_bishop_moves(board, square, rank, file, color, &mut moves),
+        PieceType::Rook => generate_rook_moves(board, square, rank, file, color, &mut moves),
+        PieceType::Queen => generate_queen_moves(board, square, rank, file, color, &mut moves),
         PieceType::King => {
-            generate_king_moves(board, rank, file, piece.color, &mut moves);
+            generate_king_moves(board, square, rank, file, color, &mut moves);
+            generate_castle_moves(board, square, color, castling_rights, &mut moves);
         }
     }
 
     moves
 }
 
-fn generate_pawn_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
+fn add_move(
+    moves: &mut Vec<Move>,
+    from: usize, to: usize,
+    piece: PieceType,
+    captured: Option<PieceType>,
+    promotion: Option<PieceType>,
+    is_castle: bool,
+    is_en_passant: bool,
+) {
+    moves.push(Move { from, to, piece, captured, promotion, is_castle, is_en_passant });
+}
+
+fn generate_pawn_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    en_passant_target: Option<usize>,
+    moves: &mut Vec<Move>,
+) {
     let direction: i8 = match color {
         Color::White => 1,
         Color::Black => -1,
     };
     let new_rank = (rank as i8 + direction) as usize;
+    let piece = PieceType::Pawn;
 
-    if new_rank < 8 && board.get_piece(new_rank, file).is_none() {
-        moves.push((new_rank, file));
+    if new_rank < 8 {
+        let to = square_index(new_rank, file);
+        if board.pieces[to].is_none() {
+            if new_rank == 0 || new_rank == 7 {
+                for &promo in &[PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight] {
+                    add_move(moves, from, to, piece, None, Some(promo), false, false);
+                }
+            } else {
+                add_move(moves, from, to, piece, None, None, false, false);
+            }
 
-        if (rank == 1 && color == Color::White) || (rank == 6 && color == Color::Black) {
-            let double_new_rank = (rank as i8 + 2 * direction) as usize;
-            if board.get_piece(double_new_rank, file).is_none() {
-                moves.push((double_new_rank, file));
+            if (rank == 1 && color == Color::White) || (rank == 6 && color == Color::Black) {
+                let double_rank = (rank as i8 + 2 * direction) as usize;
+                let double_to = square_index(double_rank, file);
+                if board.pieces[double_to].is_none() {
+                    add_move(moves, from, double_to, piece, None, None, false, false);
+                }
             }
         }
     }
-    let capture_files: [i8; 2] = [file as i8 - 1, file as i8 + 1];
-    for &capture_file in capture_files.iter() {
-        if capture_file >= 0 && capture_file < 8 {
-            let capture_rank = (rank as i8 + direction) as usize;
-            if capture_rank < 8 {
-                if let Some(captured_piece) = board.get_piece(capture_rank, capture_file as usize) {
-                    if captured_piece.color != color {
-                        moves.push((capture_rank, capture_file as usize));
+
+    for &df in &[-1i8, 1i8] {
+        let cf = file as i8 + df;
+        if cf >= 0 && cf < 8 && new_rank < 8 {
+            let to = square_index(new_rank, cf as usize);
+            if let Some(captured_piece) = board.pieces[to] {
+                if captured_piece.color != color {
+                    if new_rank == 0 || new_rank == 7 {
+                        for &promo in &[PieceType::Queen, PieceType::Rook, PieceType::Bishop, PieceType::Knight] {
+                            add_move(moves, from, to, piece, Some(captured_piece.piece_type), Some(promo), false, false);
+                        }
+                    } else {
+                        add_move(moves, from, to, piece, Some(captured_piece.piece_type), None, false, false);
                     }
                 }
             }
         }
     }
-}
 
-fn generate_rook_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
-    generate_straight_moves(board, rank, file, color, moves, 1, 0);
-    generate_straight_moves(board, rank, file, color, moves, -1, 0);
-    generate_straight_moves(board, rank, file, color, moves, 0, 1);
-    generate_straight_moves(board, rank, file, color, moves, 0, -1);
-}
-
-fn generate_bishop_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
-    generate_diagonal_moves(board, rank, file, color, moves, 1, 1);
-    generate_diagonal_moves(board, rank, file, color, moves, 1, -1);
-    generate_diagonal_moves(board, rank, file, color, moves, -1, 1);
-    generate_diagonal_moves(board, rank, file, color, moves, -1, -1);
-}
-
-fn generate_queen_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
-    generate_straight_moves(board, rank, file, color, moves, 1, 0);
-    generate_straight_moves(board, rank, file, color, moves, -1, 0);
-    generate_straight_moves(board, rank, file, color, moves, 0, 1);
-    generate_straight_moves(board, rank, file, color, moves, 0, -1);
-    generate_diagonal_moves(board, rank, file, color, moves, 1, 1);
-    generate_diagonal_moves(board, rank, file, color, moves, 1, -1);
-    generate_diagonal_moves(board, rank, file, color, moves, -1, 1);
-    generate_diagonal_moves(board, rank, file, color, moves, -1, -1);
-}
-
-fn generate_king_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
-    for i in -1..=1 {
-        for j in -1..=1 {
-            if i == 0 && j == 0 {
-                continue;
-            }
-            let new_rank = (rank as i8 + i) as usize;
-            let new_file = (file as i8 + j) as usize;
-            if new_rank < 8 && new_file < 8 {
-                if let Some(target_piece) = board.get_piece(new_rank, new_file) {
-                    if target_piece.color != color {
-                        moves.push((new_rank, new_file));
-                    }
-                }
-                else{
-                    moves.push((new_rank, new_file));
+    if let Some(ep_target) = en_passant_target {
+        let (ep_rank, ep_file) = rank_and_file(ep_target);
+        if (ep_file as i8 - file as i8).abs() == 1 && ep_rank == new_rank {
+            let captured_square = square_index(rank, ep_file);
+            if let Some(p) = board.pieces[captured_square] {
+                if p.color != color && p.piece_type == PieceType::Pawn {
+                    add_move(moves, from, ep_target, piece, Some(PieceType::Pawn), None, false, true);
                 }
             }
         }
     }
 }
 
-fn generate_knight_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>) {
-    let possible_moves: [(i8, i8); 8] = [
+fn generate_knight_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    moves: &mut Vec<Move>,
+) {
+    let offsets: [(i8, i8); 8] = [
         (-2, -1), (-2, 1), (-1, -2), (-1, 2),
         (1, -2), (1, 2), (2, -1), (2, 1),
     ];
+    let piece = PieceType::Knight;
 
-    for &(delta_rank, delta_file) in possible_moves.iter() {
-        let new_rank = (rank as i8 + delta_rank) as usize;
-        let new_file = (file as i8 + delta_file) as usize;
+    for &(dr, df) in &offsets {
+        let nr = rank as i8 + dr;
+        let nf = file as i8 + df;
+        if nr >= 0 && nr < 8 && nf >= 0 && nf < 8 {
+            let to = square_index(nr as usize, nf as usize);
+            if let Some(p) = board.pieces[to] {
+                if p.color != color {
+                    add_move(moves, from, to, piece, Some(p.piece_type), None, false, false);
+                }
+            } else {
+                add_move(moves, from, to, piece, None, None, false, false);
+            }
+        }
+    }
+}
 
-        if new_rank < 8 && new_file < 8 {
-            if let Some(target_piece) = board.get_piece(new_rank, new_file) {
-                if target_piece.color != color {
-                    moves.push((new_rank, new_file));
+fn generate_bishop_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    moves: &mut Vec<Move>,
+) {
+    let dirs: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    generate_sliding_moves(board, from, rank, file, color, PieceType::Bishop, &dirs, moves);
+}
+
+fn generate_rook_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    moves: &mut Vec<Move>,
+) {
+    let dirs: [(i8, i8); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+    generate_sliding_moves(board, from, rank, file, color, PieceType::Rook, &dirs, moves);
+}
+
+fn generate_queen_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    moves: &mut Vec<Move>,
+) {
+    let dirs: [(i8, i8); 8] = [
+        (1, 0), (-1, 0), (0, 1), (0, -1),
+        (1, 1), (1, -1), (-1, 1), (-1, -1),
+    ];
+    generate_sliding_moves(board, from, rank, file, color, PieceType::Queen, &dirs, moves);
+}
+
+fn generate_king_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color,
+    moves: &mut Vec<Move>,
+) {
+    let piece = PieceType::King;
+
+    for dr in -1i8..=1 {
+        for df in -1i8..=1 {
+            if dr == 0 && df == 0 { continue; }
+            let nr = rank as i8 + dr;
+            let nf = file as i8 + df;
+            if nr >= 0 && nr < 8 && nf >= 0 && nf < 8 {
+                let to = square_index(nr as usize, nf as usize);
+                if let Some(p) = board.pieces[to] {
+                    if p.color != color {
+                        add_move(moves, from, to, piece, Some(p.piece_type), None, false, false);
+                    }
+                } else {
+                    add_move(moves, from, to, piece, None, None, false, false);
                 }
             }
-            else{
-                 moves.push((new_rank, new_file));
-            }
         }
     }
 }
 
-fn generate_straight_moves(board: &Board, rank: usize, file: usize, color: Color, moves: &mut Vec<(usize, usize)>, rank_direction: i8, file_direction: i8) {
-    let mut current_rank = rank as i8 + rank_direction;
-    let mut current_file = file as i8 + file_direction;
-
-    while current_rank >= 0 && current_rank < 8 && current_file >= 0 && current_file < 8 {
-        let new_rank = current_rank as usize;
-        let new_file = current_file as usize;
-        if let Some(target_piece) = board.get_piece(new_rank, new_file) {
-            if target_piece.color != color {
-                moves.push((new_rank, new_file));
-            }
-            break;
-        } else {
-            moves.push((new_rank, new_file));
-        }
-        current_rank += rank_direction;
-        current_file += file_direction;
-    }
-}
-
-fn generate_diagonal_moves(
-    board: &Board,
-    rank: usize,
-    file: usize,
-    color: Color,
-    moves: &mut Vec<(usize, usize)>,
-    rank_direction: i8,
-    file_direction: i8,
+fn generate_sliding_moves(
+    board: &Board, from: usize, rank: usize, file: usize, color: Color, piece: PieceType,
+    directions: &[(i8, i8)], moves: &mut Vec<Move>,
 ) {
-    let mut current_rank = rank as i8 + rank_direction;
-    let mut current_file = file as i8 + file_direction;
-
-    while current_rank >= 0 && current_rank < 8 && current_file >= 0 && current_file < 8 {
-        let new_rank = current_rank as usize;
-        let new_file = current_file as usize;
-        if let Some(target_piece) = board.get_piece(new_rank, new_file) {
-            if target_piece.color != color {
-                moves.push((new_rank, new_file));
+    for &(dr, df) in directions {
+        let mut cr = rank as i8 + dr;
+        let mut cf = file as i8 + df;
+        while cr >= 0 && cr < 8 && cf >= 0 && cf < 8 {
+            let to = square_index(cr as usize, cf as usize);
+            if let Some(p) = board.pieces[to] {
+                if p.color != color {
+                    add_move(moves, from, to, piece, Some(p.piece_type), None, false, false);
+                }
+                break;
+            } else {
+                add_move(moves, from, to, piece, None, None, false, false);
             }
-            break;
-        } else {
-            moves.push((new_rank, new_file));
+            cr += dr;
+            cf += df;
         }
-        current_rank += rank_direction;
-        current_file += file_direction;
+    }
+}
+
+fn generate_castle_moves(
+    board: &Board, from: usize, color: Color, rights: CastlingRights,
+    moves: &mut Vec<Move>,
+) {
+    let rank = if color == Color::White { 0 } else { 7 };
+
+    let enemy = color.opposite();
+    let king_square = from;
+
+    if color == Color::White && rights.white_kingside {
+        if board.pieces[square_index(rank, 5)].is_none()
+            && board.pieces[square_index(rank, 6)].is_none()
+            && board.pieces[square_index(rank, 7)] == Some(Piece { piece_type: PieceType::Rook, color: Color::White })
+            && !board.is_square_attacked(king_square, enemy)
+            && !board.is_square_attacked(square_index(rank, 5), enemy)
+            && !board.is_square_attacked(square_index(rank, 6), enemy)
+        {
+            add_move(moves, from, square_index(rank, 6), PieceType::King, None, None, true, false);
+        }
+    }
+
+    if color == Color::White && rights.white_queenside {
+        if board.pieces[square_index(rank, 3)].is_none()
+            && board.pieces[square_index(rank, 2)].is_none()
+            && board.pieces[square_index(rank, 1)].is_none()
+            && board.pieces[square_index(rank, 0)] == Some(Piece { piece_type: PieceType::Rook, color: Color::White })
+            && !board.is_square_attacked(king_square, enemy)
+            && !board.is_square_attacked(square_index(rank, 3), enemy)
+            && !board.is_square_attacked(square_index(rank, 2), enemy)
+        {
+            add_move(moves, from, square_index(rank, 2), PieceType::King, None, None, true, false);
+        }
+    }
+
+    if color == Color::Black && rights.black_kingside {
+        if board.pieces[square_index(rank, 5)].is_none()
+            && board.pieces[square_index(rank, 6)].is_none()
+            && board.pieces[square_index(rank, 7)] == Some(Piece { piece_type: PieceType::Rook, color: Color::Black })
+            && !board.is_square_attacked(king_square, enemy)
+            && !board.is_square_attacked(square_index(rank, 5), enemy)
+            && !board.is_square_attacked(square_index(rank, 6), enemy)
+        {
+            add_move(moves, from, square_index(rank, 6), PieceType::King, None, None, true, false);
+        }
+    }
+
+    if color == Color::Black && rights.black_queenside {
+        if board.pieces[square_index(rank, 3)].is_none()
+            && board.pieces[square_index(rank, 2)].is_none()
+            && board.pieces[square_index(rank, 1)].is_none()
+            && board.pieces[square_index(rank, 0)] == Some(Piece { piece_type: PieceType::Rook, color: Color::Black })
+            && !board.is_square_attacked(king_square, enemy)
+            && !board.is_square_attacked(square_index(rank, 3), enemy)
+            && !board.is_square_attacked(square_index(rank, 2), enemy)
+        {
+            add_move(moves, from, square_index(rank, 2), PieceType::King, None, None, true, false);
+        }
     }
 }
