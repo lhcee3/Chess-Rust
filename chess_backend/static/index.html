@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chess AI</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+.container { display: flex; gap: 24px; padding: 20px; flex-wrap: wrap; justify-content: center; }
+.board-container { position: relative; }
+.board { display: grid; grid-template-columns: repeat(8, 1fr); width: 480px; height: 480px; border: 3px solid #333; border-radius: 4px; overflow: hidden; }
+.square { display: flex; align-items: center; justify-content: center; font-size: 42px; cursor: pointer; user-select: none; position: relative; }
+.square.light { background: #f0d9b5; }
+.square.dark { background: #b58863; }
+.square.selected { background: #7fc97f !important; }
+.square.highlight::after { content: ''; position: absolute; width: 14px; height: 14px; background: rgba(0,0,0,0.3); border-radius: 50%; }
+.square.last-move { background: #cdd26a !important; }
+.square.check { background: #ff6b6b !important; }
+.piece { text-shadow: 0 1px 3px rgba(0,0,0,0.4); pointer-events: none; }
+.piece.white { color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+.piece.black { color: #222; }
+.sidebar { width: 280px; display: flex; flex-direction: column; gap: 12px; }
+.panel { background: #16213e; border-radius: 8px; padding: 16px; }
+.panel h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; }
+.status { font-size: 18px; font-weight: 600; }
+.status.playing { color: #4ecdc4; }
+.status.check { color: #ffe66d; }
+.status.checkmate { color: #ff6b6b; }
+.status.stalemate { color: #aaa; }
+.move-history { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 14px; display: grid; grid-template-columns: auto 1fr 1fr; gap: 2px 8px; }
+.move-history .num { color: #666; }
+.btn { background: #4ecdc4; color: #1a1a2e; border: none; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.btn:hover { background: #45b7ae; }
+.btn.secondary { background: #2d3561; color: #eee; }
+.btn.secondary:hover { background: #3d4571; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.config-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.config-row label { font-size: 13px; color: #aaa; min-width: 70px; }
+.config-row select, .config-row input { background: #0f3460; border: 1px solid #333; color: #eee; padding: 6px 10px; border-radius: 4px; font-size: 13px; flex: 1; }
+.config-row input::placeholder { color: #555; }
+.captured { display: flex; gap: 2px; flex-wrap: wrap; font-size: 18px; min-height: 24px; }
+.loading { text-align: center; color: #4ecdc4; font-size: 14px; }
+.error { color: #ff6b6b; font-size: 13px; }
+.hidden { display: none !important; }
+@media (max-width: 800px) { .board { width: 360px; height: 360px; } .square { font-size: 32px; } .sidebar { width: 100%; } }
+@media (max-width: 500px) { .board { width: 280px; height: 280px; } .square { font-size: 26px; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="board-container">
+    <div class="board" id="board"></div>
+    <div class="loading hidden" id="loading">AI is thinking...</div>
+  </div>
+  <div class="sidebar">
+    <div class="panel">
+      <div class="status" id="status">Loading...</div>
+    </div>
+    <div class="panel">
+      <h3>Captured</h3>
+      <div><span style="color:#aaa">White:</span> <span class="captured" id="captured-white"></span></div>
+      <div><span style="color:#aaa">Black:</span> <span class="captured" id="captured-black"></span></div>
+    </div>
+    <div class="panel">
+      <h3>Moves</h3>
+      <div class="move-history" id="move-history"></div>
+    </div>
+    <div class="panel">
+      <div class="config-row">
+        <label>You play</label>
+        <select id="ai-side">
+          <option value="black">Black</option>
+          <option value="white">White</option>
+          <option value="none">Both</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label>Model</label>
+        <select id="model">
+          <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+          <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 70B</option>
+          <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+          <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label>API Key</label>
+        <input type="password" id="api-key" placeholder="groq_... or env var">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="new-game-btn" style="flex:1">New Game</button>
+        <button class="btn secondary" id="undo-btn">Undo</button>
+      </div>
+      <div id="error" class="error hidden"></div>
+    </div>
+  </div>
+</div>
+<script>
+const PIECES = {
+  'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+  'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
+};
+
+let state = null;
+let selectedSquare = null;
+let legalHighlights = [];
+let boardEl = document.getElementById('board');
+let statusEl = document.getElementById('status');
+let moveHistoryEl = document.getElementById('move-history');
+let capturedWhiteEl = document.getElementById('captured-white');
+let capturedBlackEl = document.getElementById('captured-black');
+let loadingEl = document.getElementById('loading');
+let errorEl = document.getElementById('error');
+let aiThinking = false;
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  return res.json();
+}
+
+async function loadGame() {
+  state = await api('/game');
+  render();
+}
+
+async function newGame() {
+  const side = document.getElementById('ai-side').value;
+  const model = document.getElementById('model').value;
+  state = await api('/new-game', {
+    method: 'POST',
+    body: JSON.stringify({ ai_side: side, groq_model: model }),
+  });
+  saveConfig();
+  selectedSquare = null;
+  legalHighlights = [];
+  render();
+}
+
+async function saveConfig() {
+  const key = document.getElementById('api-key').value.trim();
+  const side = document.getElementById('ai-side').value;
+  const model = document.getElementById('model').value;
+  await api('/config', {
+    method: 'POST',
+    body: JSON.stringify({ api_key: key || undefined, ai_side: side, groq_model: model }),
+  });
+}
+
+async function makeMove(uci) {
+  const res = await api('/move', {
+    method: 'POST',
+    body: JSON.stringify({ uci }),
+  });
+  if (res.ok) {
+    state = await api('/game');
+    render();
+    selectedSquare = null;
+    legalHighlights = [];
+    await triggerAI();
+  } else {
+    showError(res.error || 'Illegal move');
+  }
+}
+
+async function triggerAI() {
+  if (!state || state.status === 'checkmate' || state.status === 'stalemate') return;
+  const myTurn = state.myTurn;
+  if (!myTurn) {
+    aiThinking = true;
+    loadingEl.classList.remove('hidden');
+    const res = await api('/ai-move', { method: 'POST' });
+    aiThinking = false;
+    loadingEl.classList.add('hidden');
+    if (res.ok) {
+      state = await api('/game');
+      render();
+      if (!state.myTurn && state.status === 'playing') {
+        await triggerAI();
+      }
+    } else {
+      showError(res.error || 'AI move failed');
+    }
+  }
+}
+
+function render() {
+  if (!state) return;
+  renderBoard();
+  renderStatus();
+  renderMoves();
+  renderCaptured();
+}
+
+function renderBoard() {
+  const fen = state.fen;
+  const placement = fen.split(' ')[0];
+  const rows = placement.split('/');
+
+  let squares = [];
+  for (let r = 0; r < 8; r++) {
+    let col = 0;
+    for (const ch of rows[7 - r]) {
+      if (ch >= '1' && ch <= '8') {
+        for (let i = 0; i < parseInt(ch); i++) {
+          squares.push({ piece: null, rank: r, file: col++ });
+        }
+      } else {
+        squares.push({ piece: ch, rank: r, file: col++ });
+      }
+    }
+  }
+
+  let html = '';
+  const legalMoves = state.legalMoves || [];
+  const lastMove = state.moveHistory?.[state.moveHistory.length - 1] || null;
+
+  for (let i = 0; i < 64; i++) {
+    const { piece, rank, file } = squares[i];
+    const isLight = (rank + file) % 2 === 0;
+    const sq = String.fromCharCode(97 + file) + (rank + 1);
+    const isSelected = selectedSquare === sq;
+    const isLegalTarget = legalHighlights.includes(sq);
+    const alg = sq;
+    const isLastMove = lastMove && (alg === lastMove.slice(0, 2) || alg === lastMove.slice(2, 4));
+    const inCheck = piece === 'K' && state.status === 'check' && state.sideToMove === 'white'
+      ? true : piece === 'k' && state.status === 'check' && state.sideToMove === 'black'
+      ? true : false;
+
+    let cls = 'square ' + (isLight ? 'light' : 'dark');
+    if (isSelected) cls += ' selected';
+    if (isLegalTarget && !piece) cls += ' highlight';
+    if (isLastMove) cls += ' last-move';
+    if (inCheck) cls += ' check';
+
+    let content = piece ? `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece] || ''}</span>` : '';
+    if (isLegalTarget && piece) cls += ' highlight';
+
+    html += `<div class="${cls}" data-sq="${sq}" data-piece="${piece || ''}">${content}</div>`;
+  }
+
+  boardEl.innerHTML = html;
+
+  document.querySelectorAll('.square').forEach(el => {
+    el.addEventListener('click', () => onSquareClick(el.dataset.sq));
+  });
+}
+
+function onSquareClick(sq) {
+  if (aiThinking) return;
+  if (!state || state.status === 'checkmate' || state.status === 'stalemate') return;
+  if (!state.myTurn) return;
+
+  const legalMoves = state.legalMoves || [];
+  const fen = state.fen;
+  const placement = fen.split(' ')[0];
+  const rows = placement.split('/');
+  const file = sq.charCodeAt(0) - 97;
+  const rank = parseInt(sq[1]) - 1;
+  const row = rows[7 - rank];
+  let col = 0;
+  let pieceChar = null;
+  for (const ch of row) {
+    if (ch >= '1' && ch <= '8') {
+      col += parseInt(ch);
+      if (col - 1 === file) { pieceChar = null; break; }
+    } else {
+      if (col === file) { pieceChar = ch; break; }
+      col++;
+    }
+  }
+
+  if (selectedSquare) {
+    const uci = selectedSquare + sq;
+    const isLegal = legalMoves.includes(uci);
+
+    if (isLegal) {
+      selectedSquare = null;
+      legalHighlights = [];
+      makeMove(uci);
+      return;
+    }
+
+    if (pieceChar) {
+      const ourPieces = state.sideToMove === 'white'
+        ? pieceChar === pieceChar.toUpperCase()
+        : pieceChar === pieceChar.toLowerCase();
+      if (ourPieces) {
+        selectedSquare = sq;
+        legalHighlights = getLegalTargets(sq, legalMoves);
+        renderBoard();
+        return;
+      }
+    }
+
+    selectedSquare = null;
+    legalHighlights = [];
+    renderBoard();
+    return;
+  }
+
+  if (pieceChar) {
+    const ourPieces = state.sideToMove === 'white'
+      ? pieceChar === pieceChar.toUpperCase()
+      : pieceChar === pieceChar.toLowerCase();
+    if (ourPieces) {
+      selectedSquare = sq;
+      legalHighlights = getLegalTargets(sq, legalMoves);
+      renderBoard();
+    }
+  }
+}
+
+function getLegalTargets(sq, moves) {
+  return moves.filter(m => m.startsWith(sq)).map(m => m.slice(2, 4));
+}
+
+function renderStatus() {
+  let text = '';
+  let cls = 'status';
+  const side = state.sideToMove === 'white' ? 'White' : 'Black';
+
+  switch (state.status) {
+    case 'checkmate':
+      text = `Checkmate! ${state.winner === 'white' ? 'White' : 'Black'} wins!`;
+      cls += ' checkmate';
+      break;
+    case 'stalemate':
+      text = 'Stalemate!';
+      cls += ' stalemate';
+      break;
+    case 'check':
+      text = `${side} is in check`;
+      cls += ' check';
+      break;
+    default:
+      text = `${side} to move`;
+      cls += ' playing';
+  }
+
+  if (state.status === 'playing' || state.status === 'check') {
+    if (!state.myTurn) text += ' (AI thinking...)';
+    else text += ' (your turn)';
+  }
+
+  statusEl.textContent = text;
+  statusEl.className = cls;
+}
+
+function renderMoves() {
+  const moves = state.moveHistory || [];
+  let html = '';
+  for (let i = 0; i < moves.length; i += 2) {
+    const num = Math.floor(i / 2) + 1;
+    const w = moves[i] || '';
+    const b = moves[i + 1] || '';
+    html += `<span class="num">${num}.</span><span>${w}</span><span>${b}</span>`;
+  }
+  moveHistoryEl.innerHTML = html;
+  moveHistoryEl.scrollTop = moveHistoryEl.scrollHeight;
+}
+
+function renderCaptured() {
+  const fen = state.fen;
+  const placement = fen.split(' ')[0];
+
+  let whitePieces = { P: 0, N: 0, B: 0, R: 0, Q: 0 };
+  let blackPieces = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+
+  const rows = placement.split('/');
+  for (const row of rows) {
+    for (const ch of row) {
+      if (ch >= '1' && ch <= '8') continue;
+      if (ch === ch.toUpperCase()) {
+        if (ch !== 'K') whitePieces[ch]++;
+      } else {
+        if (ch !== 'k') blackPieces[ch]++;
+      }
+    }
+  }
+
+  const startWhite = { P: 8, N: 2, B: 2, R: 2, Q: 1 };
+  const startBlack = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+
+  function captured(start, current, color) {
+    let html = '';
+    for (const [piece, cnt] of Object.entries(start)) {
+      const lost = cnt - (current[piece] || 0);
+      for (let i = 0; i < lost; i++) {
+        html += `<span class="piece ${color}">${PIECES[piece]}</span>`;
+      }
+    }
+    return html;
+  }
+
+  capturedWhiteEl.innerHTML = captured(startWhite, whitePieces, 'white') || '—';
+  capturedBlackEl.innerHTML = captured(startBlack, blackPieces, 'black') || '—';
+}
+
+function showError(msg) {
+  errorEl.textContent = msg;
+  errorEl.classList.remove('hidden');
+  setTimeout(() => errorEl.classList.add('hidden'), 3000);
+}
+
+document.getElementById('new-game-btn').addEventListener('click', newGame);
+
+document.getElementById('ai-side').addEventListener('change', () => {
+  saveConfig();
+});
+
+document.getElementById('model').addEventListener('change', () => {
+  saveConfig();
+});
+
+document.getElementById('api-key').addEventListener('blur', () => {
+  saveConfig();
+});
+
+document.getElementById('undo-btn').addEventListener('click', () => {
+  showError('Undo not implemented yet');
+});
+
+loadGame();
+</script>
+</body>
+</html>
