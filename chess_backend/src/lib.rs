@@ -9,6 +9,9 @@ pub mod move_gen {
 pub mod engine {
     pub use crate::modules::engine::*;
 }
+pub mod game {
+    pub use crate::modules::game::*;
+}
 pub mod uci {
     pub use crate::modules::uci::*;
 }
