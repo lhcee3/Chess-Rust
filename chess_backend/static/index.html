@@ -4,427 +4,421 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chess AI</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e; color: #e0e0e0; min-height: 100vh; display: flex;
+  justify-content: center; align-items: center;
+}
 .container { display: flex; gap: 24px; padding: 20px; flex-wrap: wrap; justify-content: center; }
-.board-container { position: relative; }
-.board { display: grid; grid-template-columns: repeat(8, 1fr); width: 480px; height: 480px; border: 3px solid #333; border-radius: 4px; overflow: hidden; }
-.square { display: flex; align-items: center; justify-content: center; font-size: 42px; cursor: pointer; user-select: none; position: relative; }
-.square.light { background: #f0d9b5; }
-.square.dark { background: #b58863; }
-.square.selected { background: #7fc97f !important; }
-.square.highlight::after { content: ''; position: absolute; width: 14px; height: 14px; background: rgba(0,0,0,0.3); border-radius: 50%; }
-.square.last-move { background: #cdd26a !important; }
-.square.check { background: #ff6b6b !important; }
-.piece { text-shadow: 0 1px 3px rgba(0,0,0,0.4); pointer-events: none; }
-.piece.white { color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
-.piece.black { color: #222; }
+.board-section { text-align: center; }
+#board { width: 400px; height: 400px; margin: 0 auto; }
+#board .square-55d63 { cursor: pointer; }
 .sidebar { width: 280px; display: flex; flex-direction: column; gap: 12px; }
-.panel { background: #16213e; border-radius: 8px; padding: 16px; }
-.panel h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; }
-.status { font-size: 18px; font-weight: 600; }
-.status.playing { color: #4ecdc4; }
-.status.check { color: #ffe66d; }
-.status.checkmate { color: #ff6b6b; }
-.status.stalemate { color: #aaa; }
-.move-history { max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 14px; display: grid; grid-template-columns: auto 1fr 1fr; gap: 2px 8px; }
-.move-history .num { color: #666; }
-.btn { background: #4ecdc4; color: #1a1a2e; border: none; padding: 10px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-.btn:hover { background: #45b7ae; }
-.btn.secondary { background: #2d3561; color: #eee; }
-.btn.secondary:hover { background: #3d4571; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.config-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-.config-row label { font-size: 13px; color: #aaa; min-width: 70px; }
-.config-row select, .config-row input { background: #0f3460; border: 1px solid #333; color: #eee; padding: 6px 10px; border-radius: 4px; font-size: 13px; flex: 1; }
-.config-row input::placeholder { color: #555; }
-.captured { display: flex; gap: 2px; flex-wrap: wrap; font-size: 18px; min-height: 24px; }
-.loading { text-align: center; color: #4ecdc4; font-size: 14px; }
-.error { color: #ff6b6b; font-size: 13px; }
+.panel { background: #16213e; border-radius: 8px; padding: 14px; border: 1px solid #0f3460; }
+.panel h3 { font-size: 13px; text-transform: uppercase; color: #8899aa; margin-bottom: 8px; }
+#status { font-size: 18px; font-weight: bold; }
+#status.check { color: #ff6b6b; }
+#status.checkmate { color: #ff4757; }
+#status.stalemate { color: #ffa502; }
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.badge-playing { background: #2ed573; color: #fff; }
+.badge-check { background: #ff6b6b; color: #fff; }
+.badge-checkmate { background: #ff4757; color: #fff; }
+.badge-stalemate { background: #ffa502; color: #fff; }
+#move-history { max-height: 180px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 13px; }
+#move-history .move-row { display: flex; gap: 8px; padding: 2px 0; }
+#move-history .move-row .num { color: #8899aa; width: 30px; }
+#move-history .move-row .white, #move-history .move-row .black { width: 70px; }
+#engine-stats { font-size: 12px; color: #8899aa; line-height: 1.6; }
+.captured { font-size: 20px; letter-spacing: 1px; }
+.btn { background: #0f3460; color: #e0e0e0; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.btn:hover { background: #1a5276; }
+.btn-primary { background: #e94560; }
+.btn-primary:hover { background: #ff6b81; }
+.btn-google { background: #fff; color: #333; display: flex; align-items: center; gap: 8px; justify-content: center; padding: 10px; font-size: 14px; font-weight: 500; }
+.btn-google:hover { background: #f0f0f0; }
+.btn-google svg { width: 18px; height: 18px; }
+#auth-section { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+#user-info { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+#user-info img { width: 24px; height: 24px; border-radius: 50%; }
 .hidden { display: none !important; }
-@media (max-width: 800px) { .board { width: 360px; height: 360px; } .square { font-size: 32px; } .sidebar { width: 100%; } }
-@media (max-width: 500px) { .board { width: 280px; height: 280px; } .square { font-size: 26px; } }
+#loading { text-align: center; padding: 40px; color: #8899aa; }
+#error { background: #ff4757; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; text-align: center; }
+.settings-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0; font-size: 13px; }
+.settings-row select, .settings-row input { background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; border-radius: 4px; padding: 4px 8px; }
 </style>
 </head>
 <body>
-<div class="container">
-  <div class="board-container">
-    <div class="board" id="board"></div>
-    <div class="loading hidden" id="loading">AI is thinking...</div>
+<div id="loading">Loading...</div>
+
+<div id="app" class="container hidden">
+  <div class="board-section">
+    <div id="auth-section">
+      <button id="sign-in-btn" class="btn btn-google" onclick="signIn()">
+        <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.95 1 11.01 1 13s.43 4.05 1.18 5.93l2.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l2.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Sign in with Google
+      </button>
+      <div id="user-info" class="hidden">
+        <img id="user-avatar" src="" alt="">
+        <span id="user-email"></span>
+        <button class="btn" onclick="signOut()">Sign out</button>
+      </div>
+    </div>
+    <div id="board"></div>
   </div>
+
   <div class="sidebar">
     <div class="panel">
-      <div class="status" id="status">Loading...</div>
+      <div id="status">Starting...</div>
     </div>
+
     <div class="panel">
-      <h3>Captured</h3>
-      <div><span style="color:#aaa">White:</span> <span class="captured" id="captured-white"></span></div>
-      <div><span style="color:#aaa">Black:</span> <span class="captured" id="captured-black"></span></div>
+      <h3>Move History</h3>
+      <div id="move-history"></div>
     </div>
+
     <div class="panel">
-      <h3>Moves</h3>
-      <div class="move-history" id="move-history"></div>
+      <h3>Captured Pieces</h3>
+      <div class="captured" id="captured-white"></div>
+      <div class="captured" id="captured-black"></div>
     </div>
+
     <div class="panel">
-      <div class="config-row">
-        <label>You play</label>
-        <select id="ai-side">
+      <h3>Engine</h3>
+      <div id="engine-stats">Waiting...</div>
+    </div>
+
+    <div class="panel">
+      <h3>Settings</h3>
+      <div class="settings-row">
+        <span>AI plays</span>
+        <select id="ai-side" onchange="updateConfig()">
           <option value="black">Black</option>
           <option value="white">White</option>
-          <option value="none">Both</option>
+          <option value="none">None</option>
         </select>
       </div>
-      <div class="config-row">
-        <label>Model</label>
-        <select id="model">
-          <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
-          <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 70B</option>
-          <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-          <option value="llama-3.1-8b-instant">Llama 3.1 8B</option>
+      <div class="settings-row">
+        <span>Depth</span>
+        <select id="depth" onchange="updateConfig()">
+          <option value="4">4</option>
+          <option value="6">6</option>
+          <option value="8" selected>8</option>
+          <option value="10">10</option>
+          <option value="12">12</option>
         </select>
       </div>
-      <div class="config-row">
-        <label>API Key</label>
-        <input type="password" id="api-key" placeholder="groq_... or env var">
+      <div class="settings-row">
+        <span>Time (ms)</span>
+        <input id="time-limit" type="number" value="2000" min="500" max="30000" step="500" onchange="updateConfig()">
       </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn" id="new-game-btn" style="flex:1">New Game</button>
-        <button class="btn secondary" id="undo-btn">Undo</button>
-      </div>
-      <div id="error" class="error hidden"></div>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="newGame()">New Game</button>
+      <div id="error" class="hidden"></div>
     </div>
   </div>
 </div>
-<script>
-const PIECES = {
-  'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
-  'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟',
-};
 
-let state = null;
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+window.firebaseApp = null;
+window.firebaseAuth = null;
+let idToken = null;
+let board = null;
+let game = null;
+let gameState = null;
 let selectedSquare = null;
-let legalHighlights = [];
-let boardEl = document.getElementById('board');
-let statusEl = document.getElementById('status');
-let moveHistoryEl = document.getElementById('move-history');
-let capturedWhiteEl = document.getElementById('captured-white');
-let capturedBlackEl = document.getElementById('captured-black');
-let loadingEl = document.getElementById('loading');
-let errorEl = document.getElementById('error');
-let aiThinking = false;
 
-async function api(path, opts = {}) {
-  const res = await fetch('/api' + path, {
+const API_BASE = '/api';
+
+async function apiFetch(path, options = {}) {
+  const headers = options.headers || {};
+  if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+  const resp = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (resp.status === 401) {
+    document.getElementById('error').textContent = 'Session expired. Please sign in again.';
+    document.getElementById('error').classList.remove('hidden');
+    return null;
+  }
+  return resp;
+}
+
+async function fetchGameState() {
+  const resp = await apiFetch('/game');
+  if (!resp) return null;
+  const data = await resp.json();
+  gameState = data;
+  updateUI(data);
+  return data;
+}
+
+async function makeMove(from, to, promotion) {
+  const uci = from + to + (promotion || '');
+  const resp = await apiFetch('/move', {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  return res.json();
-}
-
-async function loadGame() {
-  state = await api('/game');
-  render();
-}
-
-async function newGame() {
-  const side = document.getElementById('ai-side').value;
-  const model = document.getElementById('model').value;
-  state = await api('/new-game', {
-    method: 'POST',
-    body: JSON.stringify({ ai_side: side, groq_model: model }),
-  });
-  saveConfig();
-  selectedSquare = null;
-  legalHighlights = [];
-  render();
-}
-
-async function saveConfig() {
-  const key = document.getElementById('api-key').value.trim();
-  const side = document.getElementById('ai-side').value;
-  const model = document.getElementById('model').value;
-  await api('/config', {
-    method: 'POST',
-    body: JSON.stringify({ api_key: key || undefined, ai_side: side, groq_model: model }),
-  });
-}
-
-async function makeMove(uci) {
-  const res = await api('/move', {
-    method: 'POST',
     body: JSON.stringify({ uci }),
   });
-  if (res.ok) {
-    state = await api('/game');
-    render();
-    selectedSquare = null;
-    legalHighlights = [];
-    await triggerAI();
-  } else {
-    showError(res.error || 'Illegal move');
+  if (!resp) return false;
+  const data = await resp.json();
+  if (!data.ok) {
+    showError(data.error);
+    return false;
   }
+  await fetchGameState();
+  if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
+    setTimeout(triggerAI, 100);
+  }
+  return true;
 }
 
 async function triggerAI() {
-  if (!state || state.status === 'checkmate' || state.status === 'stalemate') return;
-  const myTurn = state.myTurn;
-  if (!myTurn) {
-    aiThinking = true;
-    loadingEl.classList.remove('hidden');
-    const res = await api('/ai-move', { method: 'POST' });
-    aiThinking = false;
-    loadingEl.classList.add('hidden');
-    if (res.ok) {
-      state = await api('/game');
-      render();
-      if (!state.myTurn && state.status === 'playing') {
-        await triggerAI();
-      }
-    } else {
-      showError(res.error || 'AI move failed');
-    }
+  document.getElementById('status').textContent = 'AI thinking...';
+  const resp = await apiFetch('/ai-move', { method: 'POST' });
+  if (!resp) return;
+  const data = await resp.json();
+  if (data.uci) {
+    await fetchGameState();
+    updateEngineStats(data);
+  } else {
+    await fetchGameState();
   }
 }
 
-function render() {
-  if (!state) return;
-  renderBoard();
-  renderStatus();
-  renderMoves();
-  renderCaptured();
+async function newGame() {
+  const aiSide = document.getElementById('ai-side').value;
+  const depth = parseInt(document.getElementById('depth').value);
+  const timeLimit = parseInt(document.getElementById('time-limit').value);
+  const resp = await apiFetch('/new-game', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ai_side: aiSide, depth, time_limit_ms: timeLimit }),
+  });
+  if (!resp) return;
+  await fetchGameState();
+  document.getElementById('error').classList.add('hidden');
+  if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
+    setTimeout(triggerAI, 300);
+  }
 }
 
-function renderBoard() {
-  const fen = state.fen;
-  const placement = fen.split(' ')[0];
-  const rows = placement.split('/');
-
-  let squares = [];
-  for (let r = 0; r < 8; r++) {
-    let col = 0;
-    for (const ch of rows[7 - r]) {
-      if (ch >= '1' && ch <= '8') {
-        for (let i = 0; i < parseInt(ch); i++) {
-          squares.push({ piece: null, rank: r, file: col++ });
-        }
-      } else {
-        squares.push({ piece: ch, rank: r, file: col++ });
-      }
-    }
-  }
-
-  let html = '';
-  const legalMoves = state.legalMoves || [];
-  const lastMove = state.moveHistory?.[state.moveHistory.length - 1] || null;
-
-  for (let i = 0; i < 64; i++) {
-    const { piece, rank, file } = squares[i];
-    const isLight = (rank + file) % 2 === 0;
-    const sq = String.fromCharCode(97 + file) + (rank + 1);
-    const isSelected = selectedSquare === sq;
-    const isLegalTarget = legalHighlights.includes(sq);
-    const alg = sq;
-    const isLastMove = lastMove && (alg === lastMove.slice(0, 2) || alg === lastMove.slice(2, 4));
-    const inCheck = piece === 'K' && state.status === 'check' && state.sideToMove === 'white'
-      ? true : piece === 'k' && state.status === 'check' && state.sideToMove === 'black'
-      ? true : false;
-
-    let cls = 'square ' + (isLight ? 'light' : 'dark');
-    if (isSelected) cls += ' selected';
-    if (isLegalTarget && !piece) cls += ' highlight';
-    if (isLastMove) cls += ' last-move';
-    if (inCheck) cls += ' check';
-
-    let content = piece ? `<span class="piece ${piece === piece.toUpperCase() ? 'white' : 'black'}">${PIECES[piece] || ''}</span>` : '';
-    if (isLegalTarget && piece) cls += ' highlight';
-
-    html += `<div class="${cls}" data-sq="${sq}" data-piece="${piece || ''}">${content}</div>`;
-  }
-
-  boardEl.innerHTML = html;
-
-  document.querySelectorAll('.square').forEach(el => {
-    el.addEventListener('click', () => onSquareClick(el.dataset.sq));
+async function updateConfig() {
+  const aiSide = document.getElementById('ai-side').value;
+  const depth = parseInt(document.getElementById('depth').value);
+  const timeLimit = parseInt(document.getElementById('time-limit').value);
+  await apiFetch('/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ai_side: aiSide, depth, time_limit_ms: timeLimit }),
   });
 }
 
-function onSquareClick(sq) {
-  if (aiThinking) return;
-  if (!state || state.status === 'checkmate' || state.status === 'stalemate') return;
-  if (!state.myTurn) return;
+function showError(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 3000);
+}
 
-  const legalMoves = state.legalMoves || [];
-  const fen = state.fen;
-  const placement = fen.split(' ')[0];
-  const rows = placement.split('/');
-  const file = sq.charCodeAt(0) - 97;
-  const rank = parseInt(sq[1]) - 1;
-  const row = rows[7 - rank];
-  let col = 0;
-  let pieceChar = null;
-  for (const ch of row) {
-    if (ch >= '1' && ch <= '8') {
-      col += parseInt(ch);
-      if (col - 1 === file) { pieceChar = null; break; }
-    } else {
-      if (col === file) { pieceChar = ch; break; }
-      col++;
-    }
+function updateEngineStats(data) {
+  const el = document.getElementById('engine-stats');
+  if (data && data.depth) {
+    el.innerHTML = `Depth: ${data.depth}<br>Nodes: ${(data.nodes || 0).toLocaleString()}<br>NPS: ${(data.nps || 0).toLocaleString()}<br>Score: ${(data.scoreCp / 100).toFixed(2)}<br>Time: ${data.timeMs}ms`;
+  }
+}
+
+function updateUI(data) {
+  if (!data) return;
+
+  const statusEl = document.getElementById('status');
+  statusEl.className = '';
+  if (data.status === 'checkmate') {
+    statusEl.textContent = `Checkmate! ${data.winner === 'white' ? 'White' : 'Black'} wins!`;
+    statusEl.classList.add('checkmate');
+  } else if (data.status === 'stalemate') {
+    statusEl.textContent = 'Stalemate!';
+    statusEl.classList.add('stalemate');
+  } else if (data.status === 'check') {
+    statusEl.textContent = 'Check!';
+    statusEl.classList.add('check');
+  } else {
+    statusEl.textContent = data.myTurn ? 'Your turn' : 'AI thinking...';
   }
 
-  if (selectedSquare) {
-    const uci = selectedSquare + sq;
-    const isLegal = legalMoves.includes(uci);
-
-    if (isLegal) {
-      selectedSquare = null;
-      legalHighlights = [];
-      makeMove(uci);
-      return;
+  const historyEl = document.getElementById('move-history');
+  if (data.moveHistory) {
+    let html = '';
+    for (let i = 0; i < data.moveHistory.length; i += 2) {
+      const num = Math.floor(i / 2) + 1;
+      html += `<div class="move-row"><span class="num">${num}.</span><span class="white">${data.moveHistory[i] || ''}</span><span class="black">${data.moveHistory[i + 1] || ''}</span></div>`;
     }
+    historyEl.innerHTML = html;
+    historyEl.scrollTop = historyEl.scrollHeight;
+  }
 
-    if (pieceChar) {
-      const ourPieces = state.sideToMove === 'white'
-        ? pieceChar === pieceChar.toUpperCase()
-        : pieceChar === pieceChar.toLowerCase();
-      if (ourPieces) {
-        selectedSquare = sq;
-        legalHighlights = getLegalTargets(sq, legalMoves);
-        renderBoard();
+  if (board && data.fen) {
+    board.position(data.fen);
+  }
+}
+
+function onSquareClick() {
+  return function(square) {
+    if (!gameState || !gameState.myTurn || gameState.status === 'checkmate' || gameState.status === 'stalemate') return;
+
+    if (selectedSquare) {
+      if (selectedSquare === square) {
+        selectedSquare = null;
+        board.removeGreySquares();
+        return;
+      }
+      const uci = selectedSquare + square;
+      const isLegal = gameState.legalMoves && gameState.legalMoves.includes(uci);
+      if (isLegal) {
+        const from = selectedSquare;
+        selectedSquare = null;
+        board.removeGreySquares();
+        makeMove(from, square, '');
         return;
       }
     }
 
+    selectedSquare = square;
+    const moves = (gameState.legalMoves || [])
+      .filter(m => m.startsWith(square))
+      .map(m => m.slice(2, 4));
+    board.greySquares(square, moves);
+  };
+}
+
+function onDragStart() {
+  return function(source, piece) {
+    if (!gameState || !gameState.myTurn) return false;
+    if (gameState.status === 'checkmate' || gameState.status === 'stalemate') return false;
+    if (piece && gameState.myTurn) {
+      const isWhite = piece === piece.toUpperCase();
+      const myColor = gameState.sideToMove === 'white';
+      return isWhite === myColor;
+    }
+    return true;
+  };
+}
+
+function onDrop() {
+  return function(source, target) {
     selectedSquare = null;
-    legalHighlights = [];
-    renderBoard();
+    board.removeGreySquares();
+    const uci = source + target;
+    const isLegal = gameState.legalMoves && gameState.legalMoves.includes(uci);
+    if (isLegal) {
+      makeMove(source, target, '');
+      return 'snapback';
+    }
+    return 'snapback';
+  };
+}
+
+function initBoard() {
+  const config = {
+    draggable: true,
+    position: 'start',
+    pieceTheme: 'https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/img/chesspieces/wikipedia/{piece}.png',
+    onDragStart: onDragStart(),
+    onDrop: onDrop(),
+    onSnapEnd: function() { board.position(gameState?.fen || 'start'); },
+  };
+  board = Chessboard('board', config);
+  board.addSquareClickHandler(onSquareClick());
+}
+
+window.signIn = async function() {
+  if (!window.firebaseAuth) return;
+  const provider = new GoogleAuthProvider();
+  try {
+    const result = await signInWithPopup(window.firebaseAuth, provider);
+    const user = result.user;
+    idToken = await user.getIdToken();
+    document.getElementById('sign-in-btn').classList.add('hidden');
+    const ui = document.getElementById('user-info');
+    ui.classList.remove('hidden');
+    document.getElementById('user-avatar').src = user.photoURL || '';
+    document.getElementById('user-email').textContent = user.email || user.displayName || '';
+    await fetchGameState();
+    if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
+      setTimeout(triggerAI, 300);
+    }
+  } catch (e) {
+    showError('Sign in failed: ' + e.message);
+  }
+};
+
+window.signOut = async function() {
+  if (window.firebaseAuth) {
+    await fbSignOut(window.firebaseAuth);
+  }
+  idToken = null;
+  document.getElementById('sign-in-btn').classList.remove('hidden');
+  document.getElementById('user-info').classList.add('hidden');
+  document.getElementById('board').innerHTML = '';
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('loading').textContent = 'Signed out. Refresh to play again.';
+  document.getElementById('loading').classList.remove('hidden');
+};
+
+document.addEventListener('DOMContentLoaded', async function() {
+  try {
+    const healthResp = await fetch('/api/health');
+    const health = await healthResp.json();
+    console.log('Server:', health);
+  } catch (e) {
+    document.getElementById('loading').textContent = 'Cannot connect to server. Is it running?';
     return;
   }
 
-  if (pieceChar) {
-    const ourPieces = state.sideToMove === 'white'
-      ? pieceChar === pieceChar.toUpperCase()
-      : pieceChar === pieceChar.toLowerCase();
-    if (ourPieces) {
-      selectedSquare = sq;
-      legalHighlights = getLegalTargets(sq, legalMoves);
-      renderBoard();
-    }
-  }
-}
+  const firebaseConfig = {
+    apiKey: "AIzaSyDemoPlaceholder",
+    authDomain: "placeholder.firebaseapp.com",
+    projectId: "placeholder",
+  };
 
-function getLegalTargets(sq, moves) {
-  return moves.filter(m => m.startsWith(sq)).map(m => m.slice(2, 4));
-}
+  try {
+    window.firebaseApp = initializeApp(firebaseConfig);
+    window.firebaseAuth = getAuth(window.firebaseApp);
 
-function renderStatus() {
-  let text = '';
-  let cls = 'status';
-  const side = state.sideToMove === 'white' ? 'White' : 'Black';
-
-  switch (state.status) {
-    case 'checkmate':
-      text = `Checkmate! ${state.winner === 'white' ? 'White' : 'Black'} wins!`;
-      cls += ' checkmate';
-      break;
-    case 'stalemate':
-      text = 'Stalemate!';
-      cls += ' stalemate';
-      break;
-    case 'check':
-      text = `${side} is in check`;
-      cls += ' check';
-      break;
-    default:
-      text = `${side} to move`;
-      cls += ' playing';
-  }
-
-  if (state.status === 'playing' || state.status === 'check') {
-    if (!state.myTurn) text += ' (AI thinking...)';
-    else text += ' (your turn)';
-  }
-
-  statusEl.textContent = text;
-  statusEl.className = cls;
-}
-
-function renderMoves() {
-  const moves = state.moveHistory || [];
-  let html = '';
-  for (let i = 0; i < moves.length; i += 2) {
-    const num = Math.floor(i / 2) + 1;
-    const w = moves[i] || '';
-    const b = moves[i + 1] || '';
-    html += `<span class="num">${num}.</span><span>${w}</span><span>${b}</span>`;
-  }
-  moveHistoryEl.innerHTML = html;
-  moveHistoryEl.scrollTop = moveHistoryEl.scrollHeight;
-}
-
-function renderCaptured() {
-  const fen = state.fen;
-  const placement = fen.split(' ')[0];
-
-  let whitePieces = { P: 0, N: 0, B: 0, R: 0, Q: 0 };
-  let blackPieces = { p: 0, n: 0, b: 0, r: 0, q: 0 };
-
-  const rows = placement.split('/');
-  for (const row of rows) {
-    for (const ch of row) {
-      if (ch >= '1' && ch <= '8') continue;
-      if (ch === ch.toUpperCase()) {
-        if (ch !== 'K') whitePieces[ch]++;
+    onAuthStateChanged(window.firebaseAuth, async (user) => {
+      if (user) {
+        idToken = await user.getIdToken();
+        document.getElementById('sign-in-btn').classList.add('hidden');
+        const ui = document.getElementById('user-info');
+        ui.classList.remove('hidden');
+        document.getElementById('user-avatar').src = user.photoURL || '';
+        document.getElementById('user-email').textContent = user.email || user.displayName || '';
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        initBoard();
+        await fetchGameState();
+        if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
+          setTimeout(triggerAI, 300);
+        }
       } else {
-        if (ch !== 'k') blackPieces[ch]++;
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
+        initBoard();
       }
-    }
+    });
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    initBoard();
+    await fetchGameState();
   }
-
-  const startWhite = { P: 8, N: 2, B: 2, R: 2, Q: 1 };
-  const startBlack = { p: 8, n: 2, b: 2, r: 2, q: 1 };
-
-  function captured(start, current, color) {
-    let html = '';
-    for (const [piece, cnt] of Object.entries(start)) {
-      const lost = cnt - (current[piece] || 0);
-      for (let i = 0; i < lost; i++) {
-        html += `<span class="piece ${color}">${PIECES[piece]}</span>`;
-      }
-    }
-    return html;
-  }
-
-  capturedWhiteEl.innerHTML = captured(startWhite, whitePieces, 'white') || '—';
-  capturedBlackEl.innerHTML = captured(startBlack, blackPieces, 'black') || '—';
-}
-
-function showError(msg) {
-  errorEl.textContent = msg;
-  errorEl.classList.remove('hidden');
-  setTimeout(() => errorEl.classList.add('hidden'), 3000);
-}
-
-document.getElementById('new-game-btn').addEventListener('click', newGame);
-
-document.getElementById('ai-side').addEventListener('change', () => {
-  saveConfig();
 });
-
-document.getElementById('model').addEventListener('change', () => {
-  saveConfig();
-});
-
-document.getElementById('api-key').addEventListener('blur', () => {
-  saveConfig();
-});
-
-document.getElementById('undo-btn').addEventListener('click', () => {
-  showError('Undo not implemented yet');
-});
-
-loadGame();
 </script>
 </body>
 </html>

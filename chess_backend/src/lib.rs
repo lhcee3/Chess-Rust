@@ -12,9 +12,6 @@ pub mod engine {
 pub mod game {
     pub use crate::modules::game::*;
 }
-pub mod groq_ai {
-    pub use crate::modules::groq_ai::*;
-}
-pub mod uci {
-    pub use crate::modules::uci::*;
+pub mod auth {
+    pub use crate::modules::auth::*;
 }

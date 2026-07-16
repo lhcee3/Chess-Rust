@@ -3,6 +3,7 @@ use crate::board::{
     square_index, rank_and_file, square_to_algebraic,
 };
 use crate::move_gen;
+use crate::engine::EngineConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameStatus {
@@ -23,7 +24,7 @@ pub struct Game {
     pub move_history: Vec<Move>,
     pub status: GameStatus,
     pub ai_side: Option<Color>,
-    pub groq_model: String,
+    pub engine_config: EngineConfig,
 }
 
 impl Game {
@@ -38,7 +39,7 @@ impl Game {
             move_history: Vec::new(),
             status: GameStatus::Playing,
             ai_side: Some(Color::Black),
-            groq_model: "llama-3.3-70b-versatile".to_string(),
+            engine_config: EngineConfig::default(),
         }
     }
 
@@ -87,7 +88,7 @@ impl Game {
         let opponent_moves = self.get_legal_moves();
         self.status = if opponent_moves.is_empty() {
             if self.is_check() {
-                GameStatus::Checkmate(self.side_to_move.opposite())
+                GameStatus::Checkmate(self.side_to_move)
             } else {
                 GameStatus::Stalemate
             }
@@ -126,8 +127,8 @@ impl Game {
             is_en_passant: false,
         };
 
-        let (from_rank, from_file) = rank_and_file(from);
-        let (to_rank, to_file) = rank_and_file(to);
+        let (_from_rank, from_file) = rank_and_file(from);
+        let (_to_rank, to_file) = rank_and_file(to);
 
         if piece == PieceType::King && (from_file as i8 - to_file as i8).abs() == 2 {
             mv.is_castle = true;
@@ -147,7 +148,7 @@ impl Game {
 
     fn execute_move(&mut self, mv: &Move) {
         let (from_rank, _) = rank_and_file(mv.from);
-        let (to_rank, _) = rank_and_file(mv.to);
+        let (_to_rank, _) = rank_and_file(mv.to);
 
         let is_capture = mv.captured.is_some();
         let is_pawn_move = mv.piece == PieceType::Pawn;
@@ -313,6 +314,10 @@ impl Game {
             "moveHistory": self.move_history.iter().map(|m| self.move_to_uci(m)).collect::<Vec<_>>(),
             "aiSide": self.ai_side.map(|c| if c == Color::White { "white" } else { "black" }),
             "myTurn": self.ai_side.map(|a| a != self.side_to_move).unwrap_or(true),
+            "engine": {
+                "depth": self.engine_config.depth_limit,
+                "timeLimitMs": self.engine_config.time_limit_ms,
+            },
         })
     }
 }

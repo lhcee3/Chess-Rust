@@ -1,11 +1,14 @@
-use std::sync::Mutex;
-use actix_web::{web, App, HttpResponse, HttpServer, middleware};
+use std::sync::Arc;
+use actix_web::{web, App, HttpResponse, HttpServer, HttpRequest, middleware};
 use serde::{Deserialize, Serialize};
+use dashmap::DashMap;
 use chess_backend::game::{Game, GameStatus};
+use chess_backend::engine::{EngineConfig, best_move};
+use chess_backend::auth::{FirebaseConfig, verify_token, UserCtx};
 
 struct AppState {
-    game: Mutex<Game>,
-    api_key: Mutex<String>,
+    games: DashMap<String, Game>,
+    firebase: FirebaseConfig,
 }
 
 #[derive(Deserialize)]
@@ -16,14 +19,15 @@ struct MoveRequest {
 #[derive(Deserialize)]
 struct NewGameRequest {
     ai_side: Option<String>,
-    groq_model: Option<String>,
+    depth: Option<u8>,
+    time_limit_ms: Option<u64>,
 }
 
 #[derive(Deserialize)]
 struct ConfigRequest {
-    api_key: Option<String>,
     ai_side: Option<String>,
-    groq_model: Option<String>,
+    depth: Option<u8>,
+    time_limit_ms: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -33,30 +37,73 @@ struct ApiResponse {
     error: Option<String>,
 }
 
-async fn get_game(data: web::Data<AppState>) -> HttpResponse {
-    let game = data.game.lock().unwrap();
+async fn get_token(req: &HttpRequest) -> Result<String, HttpResponse> {
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| HttpResponse::Unauthorized().json(ApiResponse {
+            ok: false, message: None,
+            error: Some("Missing Authorization header".to_string()),
+        }))?;
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| HttpResponse::Unauthorized().json(ApiResponse {
+            ok: false, message: None,
+            error: Some("Invalid Authorization format".to_string()),
+        }))?;
+    Ok(token.to_string())
+}
+
+async fn auth_middleware(req: &HttpRequest, data: &web::Data<AppState>) -> Result<UserCtx, HttpResponse> {
+    let token = get_token(req).await?;
+    verify_token(&token, &data.firebase).await.map_err(|e| {
+        HttpResponse::Unauthorized().json(ApiResponse {
+            ok: false, message: None,
+            error: Some(format!("Auth failed: {}", e)),
+        })
+    })
+}
+
+async fn index() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(include_str!("../static/index.html"))
+}
+
+async fn get_game(data: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
+    let user = match auth_middleware(&req, &data).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let mut game = data.games.entry(user.uid.clone()).or_insert_with(|| Game::new());
     let mut json = game.get_game_state_json();
     if let Some(map) = json.as_object_mut() {
-        let has_key = !data.api_key.lock().unwrap().is_empty() ||
-                       std::env::var("GROQ_API_KEY").is_ok();
-        map.insert("apiKeyConfigured".to_string(), serde_json::json!(has_key));
+        map.insert("user".to_string(), serde_json::json!({
+            "uid": user.uid,
+            "email": user.email,
+        }));
     }
     HttpResponse::Ok().json(json)
 }
 
 async fn make_move(
     data: web::Data<AppState>,
+    req: HttpRequest,
     body: web::Json<MoveRequest>,
 ) -> HttpResponse {
-    let mut game = data.game.lock().unwrap();
+    let user = match auth_middleware(&req, &data).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let mut game = data.games.entry(user.uid.clone()).or_insert_with(|| Game::new());
 
-    if game.status == GameStatus::Checkmate(_) || game.status == GameStatus::Stalemate {
+    if matches!(game.status, GameStatus::Checkmate(_) | GameStatus::Stalemate) {
         return HttpResponse::BadRequest().json(ApiResponse {
             ok: false, message: None,
             error: Some("Game is over".to_string()),
         });
     }
-
     if let Some(ai) = game.ai_side {
         if ai == game.side_to_move {
             return HttpResponse::BadRequest().json(ApiResponse {
@@ -68,102 +115,100 @@ async fn make_move(
 
     match game.make_move_uci(&body.uci) {
         Ok(()) => HttpResponse::Ok().json(ApiResponse {
-            ok: true,
-            message: Some(body.uci.clone()),
-            error: None,
+            ok: true, message: Some(body.uci.clone()), error: None,
         }),
         Err(e) => HttpResponse::BadRequest().json(ApiResponse {
-            ok: false, message: None,
-            error: Some(e),
+            ok: false, message: None, error: Some(e),
         }),
     }
 }
 
-async fn ai_move(data: web::Data<AppState>) -> HttpResponse {
-    let api_key = {
-        let key = data.api_key.lock().unwrap().clone();
-        if !key.is_empty() {
-            key
-        } else {
-            match std::env::var("GROQ_API_KEY") {
-                Ok(k) => k,
-                Err(_) => return HttpResponse::InternalServerError().json(ApiResponse {
-                    ok: false, message: None,
-                    error: Some("GROQ_API_KEY not set. Set it as env var or via /api/config".to_string()),
-                }),
-            }
-        }
+async fn ai_move(data: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
+    let user = match auth_middleware(&req, &data).await {
+        Ok(u) => u,
+        Err(r) => return r,
     };
+    let mut game = data.games.entry(user.uid.clone()).or_insert_with(|| Game::new());
 
-    let game_clone = {
-        let game = data.game.lock().unwrap();
-        if let Some(ai) = game.ai_side {
-            if ai != game.side_to_move {
-                return HttpResponse::BadRequest().json(ApiResponse {
-                    ok: false, message: None,
-                    error: Some("It's not the AI's turn".to_string()),
-                });
-            }
-        }
-        if game.status == GameStatus::Checkmate(_) || game.status == GameStatus::Stalemate {
+    if matches!(game.status, GameStatus::Checkmate(_) | GameStatus::Stalemate) {
+        return HttpResponse::BadRequest().json(ApiResponse {
+            ok: false, message: None,
+            error: Some("Game is over".to_string()),
+        });
+    }
+    if let Some(ai) = game.ai_side {
+        if ai != game.side_to_move {
             return HttpResponse::BadRequest().json(ApiResponse {
                 ok: false, message: None,
-                error: Some("Game is over".to_string()),
+                error: Some("It's not the AI's turn".to_string()),
             });
         }
-        game.clone()
-    };
+    }
 
-    let result = chess_backend::groq_ai::get_ai_move_with_retry(&game_clone, &api_key, 3).await;
+    let cfg = game.engine_config.clone();
+    let game_snapshot = game.clone();
+    let result = best_move(&game_snapshot, &cfg);
 
-    match result {
-        Ok(uci) => {
-            let mut game = data.game.lock().unwrap();
-            match game.make_move_uci(&uci) {
-                Ok(()) => HttpResponse::Ok().json(serde_json::json!({
-                    "ok": true,
-                    "uci": uci,
-                })),
-                Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-                    ok: false, message: None,
-                    error: Some(format!("AI move '{}' failed: {}", uci, e)),
-                }),
-            }
+    if let Some(mv) = result.best_move {
+        let uci = game.move_to_uci(&mv);
+        match game.make_move(&mv) {
+            Ok(()) => HttpResponse::Ok().json(serde_json::json!({
+                "ok": true,
+                "uci": uci,
+                "engine": "local",
+                "depth": result.depth,
+                "nodes": result.nodes,
+                "nps": result.nps,
+                "scoreCp": result.score,
+                "timeMs": result.time_ms,
+            })),
+            Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
+                ok: false, message: None,
+                error: Some(format!("AI move failed: {}", e)),
+            }),
         }
-        Err(e) => HttpResponse::InternalServerError().json(ApiResponse {
-            ok: false, message: None,
-            error: Some(e),
-        }),
+    } else {
+        HttpResponse::Ok().json(serde_json::json!({
+            "ok": true,
+            "uci": null,
+            "message": "No move found (stalemate or checkmate)",
+        }))
     }
 }
 
 async fn new_game(
     data: web::Data<AppState>,
+    req: HttpRequest,
     body: web::Json<NewGameRequest>,
 ) -> HttpResponse {
-    let mut game = data.game.lock().unwrap();
-    *game = Game::new();
+    let user = match auth_middleware(&req, &data).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let mut game = Game::new();
     game.ai_side = match body.ai_side.as_deref() {
         Some("white") => Some(chess_backend::board::Color::White),
         Some("black") => Some(chess_backend::board::Color::Black),
         Some("none") => None,
         _ => game.ai_side,
     };
-    if let Some(ref model) = body.groq_model {
-        game.groq_model = model.clone();
-    }
-    HttpResponse::Ok().json(game.get_game_state_json())
+    if let Some(d) = body.depth { game.engine_config.depth_limit = d; }
+    if let Some(t) = body.time_limit_ms { game.engine_config.time_limit_ms = t; }
+    data.games.insert(user.uid.clone(), game);
+    HttpResponse::Ok().json(ApiResponse { ok: true, message: None, error: None })
 }
 
 async fn config(
     data: web::Data<AppState>,
+    req: HttpRequest,
     body: web::Json<ConfigRequest>,
 ) -> HttpResponse {
-    if let Some(ref key) = body.api_key {
-        *data.api_key.lock().unwrap() = key.clone();
-    }
+    let user = match auth_middleware(&req, &data).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let mut game = data.games.entry(user.uid.clone()).or_insert_with(|| Game::new());
     if let Some(ref side) = body.ai_side {
-        let mut game = data.game.lock().unwrap();
         game.ai_side = match side.as_str() {
             "white" => Some(chess_backend::board::Color::White),
             "black" => Some(chess_backend::board::Color::Black),
@@ -171,36 +216,47 @@ async fn config(
             _ => game.ai_side,
         };
     }
-    if let Some(ref model) = body.groq_model {
-        let mut game = data.game.lock().unwrap();
-        game.groq_model = model.clone();
-    }
+    if let Some(d) = body.depth { game.engine_config.depth_limit = d; }
+    if let Some(t) = body.time_limit_ms { game.engine_config.time_limit_ms = t; }
     HttpResponse::Ok().json(ApiResponse { ok: true, message: None, error: None })
 }
 
-async fn index() -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html")
-        .body(include_str!("../static/index.html"))
+async fn health() -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "ok": true,
+        "version": "0.2.0",
+        "engine": "local",
+    }))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenvy::dotenv().ok();
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
 
+    let firebase = FirebaseConfig::new();
+    if let Ok(key) = std::env::var("FIREBASE_API_KEY") {
+        *firebase.api_key.write().unwrap() = key;
+    }
+    if let Ok(pid) = std::env::var("FIREBASE_PROJECT_ID") {
+        *firebase.project_id.write().unwrap() = pid;
+    }
+
     let data = web::Data::new(AppState {
-        game: Mutex::new(Game::new()),
-        api_key: Mutex::new(String::new()),
+        games: DashMap::new(),
+        firebase,
     });
 
     log::info!("Starting chess server on http://127.0.0.1:8080");
-    log::info!("Set GROQ_API_KEY environment variable or use /api/config for AI moves");
+    log::info!("Engine: local alpha-beta (depth 8, 2s)");
+    log::info!("Set FIREBASE_API_KEY and FIREBASE_PROJECT_ID in .env for auth");
 
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
             .wrap(middleware::Logger::default())
             .route("/", web::get().to(index))
+            .route("/api/health", web::get().to(health))
             .service(
                 web::scope("/api")
                     .route("/game", web::get().to(get_game))
@@ -211,6 +267,7 @@ async fn main() -> std::io::Result<()> {
             )
     })
     .bind("127.0.0.1:8080")?
+    .bind("127.0.0.1:8090")?
     .run()
     .await
 }
