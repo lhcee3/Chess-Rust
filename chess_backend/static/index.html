@@ -124,11 +124,12 @@ body {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-
-window.firebaseApp = null;
-window.firebaseAuth = null;
+let firebaseAuth = null;
+let GoogleAuthProviderCtor = null;
+let signInWithPopupFn = null;
+let fbSignOutFn = null;
+let onAuthStateChangedFn = null;
+let authOptional = false;
 let idToken = null;
 let board = null;
 let game = null;
@@ -336,30 +337,57 @@ function initBoard() {
   board.addSquareClickHandler(onSquareClick());
 }
 
-window.signIn = async function() {
-  if (!window.firebaseAuth) return;
-  const provider = new GoogleAuthProvider();
-  try {
-    const result = await signInWithPopup(window.firebaseAuth, provider);
-    const user = result.user;
-    idToken = await user.getIdToken();
-    document.getElementById('sign-in-btn').classList.add('hidden');
-    const ui = document.getElementById('user-info');
-    ui.classList.remove('hidden');
-    document.getElementById('user-avatar').src = user.photoURL || '';
-    document.getElementById('user-email').textContent = user.email || user.displayName || '';
-    await fetchGameState();
+async function loadFirebase() {
+  const fbApp = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
+  const fbAuth = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
+  const firebaseConfig = {
+    apiKey: "AIzaSyB1P1gRda5Wninc-pPu_vdKJ4MsaGKOvys",
+    authDomain: "chess-eeb7e.firebaseapp.com",
+    projectId: "chess-eeb7e",
+  };
+  const app = fbApp.initializeApp(firebaseConfig);
+  firebaseAuth = fbAuth.getAuth(app);
+  GoogleAuthProviderCtor = fbAuth.GoogleAuthProvider;
+  signInWithPopupFn = fbAuth.signInWithPopup;
+  fbSignOutFn = fbAuth.signOut;
+  onAuthStateChangedFn = fbAuth.onAuthStateChanged;
+}
+
+function startGame() {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  initBoard();
+  return fetchGameState().then(() => {
     if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
       setTimeout(triggerAI, 300);
     }
+  });
+}
+
+async function handleSignedInUser(user) {
+  idToken = await user.getIdToken();
+  document.getElementById('sign-in-btn').classList.add('hidden');
+  const ui = document.getElementById('user-info');
+  ui.classList.remove('hidden');
+  document.getElementById('user-avatar').src = user.photoURL || '';
+  document.getElementById('user-email').textContent = user.email || user.displayName || '';
+  await startGame();
+}
+
+window.signIn = async function() {
+  if (!firebaseAuth) return;
+  const provider = new GoogleAuthProviderCtor();
+  try {
+    const result = await signInWithPopupFn(firebaseAuth, provider);
+    await handleSignedInUser(result.user);
   } catch (e) {
     showError('Sign in failed: ' + e.message);
   }
 };
 
 window.signOut = async function() {
-  if (window.firebaseAuth) {
-    await fbSignOut(window.firebaseAuth);
+  if (firebaseAuth) {
+    await fbSignOutFn(firebaseAuth);
   }
   idToken = null;
   document.getElementById('sign-in-btn').classList.remove('hidden');
@@ -372,51 +400,35 @@ window.signOut = async function() {
 };
 
 document.addEventListener('DOMContentLoaded', async function() {
+  let health;
   try {
-    const healthResp = await fetch('/api/health');
-    const health = await healthResp.json();
-    console.log('Server:', health);
+    health = await (await fetch('/api/health')).json();
   } catch (e) {
     document.getElementById('loading').textContent = 'Cannot connect to server. Is it running?';
     return;
   }
+  console.log('Server:', health);
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyDemoPlaceholder",
-    authDomain: "placeholder.firebaseapp.com",
-    projectId: "placeholder",
-  };
+  if (health.auth === 'optional') {
+    authOptional = true;
+    document.getElementById('sign-in-btn').classList.add('hidden');
+    await startGame();
+    return;
+  }
 
   try {
-    window.firebaseApp = initializeApp(firebaseConfig);
-    window.firebaseAuth = getAuth(window.firebaseApp);
-
-    onAuthStateChanged(window.firebaseAuth, async (user) => {
+    await loadFirebase();
+    onAuthStateChangedFn(firebaseAuth, async (user) => {
       if (user) {
-        idToken = await user.getIdToken();
-        document.getElementById('sign-in-btn').classList.add('hidden');
-        const ui = document.getElementById('user-info');
-        ui.classList.remove('hidden');
-        document.getElementById('user-avatar').src = user.photoURL || '';
-        document.getElementById('user-email').textContent = user.email || user.displayName || '';
-        document.getElementById('loading').classList.add('hidden');
-        document.getElementById('app').classList.remove('hidden');
-        initBoard();
-        await fetchGameState();
-        if (gameState && gameState.myTurn === false && gameState.status === 'playing') {
-          setTimeout(triggerAI, 300);
-        }
+        await handleSignedInUser(user);
       } else {
-        document.getElementById('loading').classList.add('hidden');
-        document.getElementById('app').classList.remove('hidden');
-        initBoard();
+        document.getElementById('loading').textContent = 'Sign in to play.';
       }
     });
   } catch (e) {
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    initBoard();
-    await fetchGameState();
+    document.getElementById('loading').textContent = 'Sign-in failed to load: ' + e.message;
+    document.getElementById('error').textContent = 'Check your Firebase config on the server.';
+    document.getElementById('error').classList.remove('hidden');
   }
 });
 </script>

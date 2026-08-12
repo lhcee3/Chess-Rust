@@ -20,7 +20,16 @@ pub struct UserCtx {
     pub email: String,
 }
 
+pub fn dev_mode_enabled() -> bool {
+    let api_key = std::env::var("FIREBASE_API_KEY").unwrap_or_default();
+    api_key.trim().is_empty()
+}
+
 pub async fn verify_token(id_token: &str, config: &FirebaseConfig) -> Result<UserCtx, String> {
+    if dev_mode_enabled() {
+        log::warn!("FIREBASE_API_KEY not set — dev mode: accepting requests without auth");
+        return Ok(UserCtx { uid: "local".to_string(), email: String::new() });
+    }
     let api_key = config.api_key.read().map_err(|e| format!("lock error: {}", e))?.clone();
     if api_key.is_empty() {
         let env_key = std::env::var("FIREBASE_API_KEY").unwrap_or_default();

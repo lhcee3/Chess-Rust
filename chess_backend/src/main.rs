@@ -222,10 +222,16 @@ async fn config(
 }
 
 async fn health() -> HttpResponse {
+    let auth = if chess_backend::auth::dev_mode_enabled() {
+        "optional"
+    } else {
+        "required"
+    };
     HttpResponse::Ok().json(serde_json::json!({
         "ok": true,
         "version": "0.2.0",
         "engine": "local",
+        "auth": auth,
     }))
 }
 
