@@ -11,6 +11,16 @@ const MAX_PLY: i8 = 127;
 const MATE_SCORE: i32 = 1_000_000;
 const DRAW_SCORE: i32 = 0;
 
+fn game_move_uci(mv: &Move) -> String {
+    crate::game::Game::new().move_to_uci(mv)
+}
+
+static CFG_TEST_PRINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn cfg_test_print() -> bool {
+    CFG_TEST_PRINT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub depth_limit: u8,
@@ -259,6 +269,9 @@ pub fn best_move(game: &crate::game::Game, cfg: &EngineConfig) -> SearchResult {
             let undo = pos.make_move(mv);
             if !pos.in_check() {
                 let score = -alpha_beta(&mut pos, depth as i8 - 1, -beta, -alpha, 1, &mut ss, &mut tt, &tm, &mut total_nodes, cfg);
+                if cfg_test_print() && depth == cfg.depth_limit {
+                    println!("  {} -> {}", game_move_uci(mv), score);
+                }
                 if score > alpha {
                     alpha = score;
                     best = *mv;
@@ -286,7 +299,7 @@ fn alpha_beta(
     pos: &mut Position,
     depth: i8,
     mut alpha: i32,
-    beta: i32,
+    mut beta: i32,
     ply: i8,
     ss: &mut SearchStack,
     tt: &mut TranspositionTable,
@@ -294,10 +307,10 @@ fn alpha_beta(
     nodes: &mut u64,
     cfg: &EngineConfig,
 ) -> i32 {
-    if tm.hard_exceeded() { return eval::evaluate(&pos.board, pos.side_to_move); }
+    if tm.hard_exceeded() { let r = eval::evaluate(&pos.board, pos.side_to_move); if cfg_test_print() { println!("    AB-hard: ply={} r={}", ply, r); } return r; }
     *nodes += 1;
-    if pos.is_draw() { return DRAW_SCORE; }
-    if ply > MAX_PLY as i8 { return eval::evaluate(&pos.board, pos.side_to_move); }
+    if pos.is_draw() { if cfg_test_print() { println!("    AB-draw: ply={}", ply); } return DRAW_SCORE; }
+    if ply > MAX_PLY as i8 { let r = eval::evaluate(&pos.board, pos.side_to_move); if cfg_test_print() { println!("    AB-maxply: ply={} r={}", ply, r); } return r; }
 
     let in_check = pos.in_check();
     let pv_node = beta - alpha > 1;
@@ -305,14 +318,29 @@ fn alpha_beta(
     let (_tt_hit, _tt_score_opt, tt_move): (bool, Option<i32>, Option<Move>) = (false, None, None);
 
     if depth <= 0 {
-        return if cfg.use_quiescence { quiescence(pos, alpha, beta, ply, nodes, tm, cfg) }
-               else { eval::evaluate(&pos.board, pos.side_to_move) };
+        let r = if cfg.use_quiescence { quiescence(pos, alpha, beta, ply, nodes, tm, cfg) }
+                else { eval::evaluate(&pos.board, pos.side_to_move) };
+        if cfg_test_print() { println!("    AB-depth0: ply={} r={}", ply, r); }
+        return r;
     }
 
     // Mate distance pruning
     let mating = MATE_SCORE - ply as i32;
-    if mating < beta { return beta.max(mating); }
-    if -mating > alpha { alpha = alpha.max(-mating); }
+    if mating < beta {
+        beta = mating;
+        if alpha >= beta {
+            if cfg_test_print() { println!("    MDP1: ply={} alpha={}", ply, alpha); }
+            return alpha;
+        }
+    }
+    let mated = -MATE_SCORE + ply as i32;
+    if mated > alpha {
+        alpha = mated;
+        if alpha >= beta {
+            if cfg_test_print() { println!("    MDP2: ply={} alpha={}", ply, alpha); }
+            return alpha;
+        }
+    }
 
     // Null move pruning
     if !pv_node && !in_check && depth >= 3 && has_non_pawn_material(pos, pos.side_to_move) {
@@ -326,7 +354,9 @@ fn alpha_beta(
 
     let mut moves = generate_legal_moves(pos);
     if moves.is_empty() {
-        return if in_check { -(MATE_SCORE - ply as i32) } else { DRAW_SCORE };
+        let r = if in_check { -(MATE_SCORE - ply as i32) } else { DRAW_SCORE };
+        if cfg_test_print() { println!("    EMPTY: ply={} in_check={} ret={}", ply, in_check, r); }
+        return r;
     }
 
     moves.sort_by(|a, b| {
@@ -364,6 +394,7 @@ fn alpha_beta(
             }
         }
     }
+    if cfg_test_print() { println!("    AB-end: ply={} depth={} alpha={}", ply, depth, alpha); }
     alpha
 }
 
@@ -379,11 +410,17 @@ fn quiescence(
     *nodes += 1;
     if tm.hard_exceeded() { return eval::evaluate(&pos.board, pos.side_to_move); }
 
+    let in_check = pos.in_check();
     let stand_pat = eval::evaluate(&pos.board, pos.side_to_move);
-    if stand_pat >= beta { return beta; }
-    if alpha < stand_pat { alpha = stand_pat; }
+    if !in_check {
+        if stand_pat >= beta { return beta; }
+        if alpha < stand_pat { alpha = stand_pat; }
+    }
 
     let moves = generate_legal_moves(pos);
+    if moves.is_empty() {
+        return if in_check { -(MATE_SCORE - ply as i32) } else { stand_pat };
+    }
     let captures: Vec<&Move> = moves.iter().filter(|m| m.captured.is_some() || m.promotion.is_some()).collect();
 
     for mv in captures {
@@ -403,4 +440,91 @@ fn has_non_pawn_material(pos: &Position, color: Color) -> bool {
         }
     }
     false
+}
+
+fn perft(pos: &mut Position, depth: i8) -> u64 {
+    let moves = generate_legal_moves(pos);
+    if depth <= 1 {
+        return moves.len() as u64;
+    }
+    let mut count = 0;
+    for mv in &moves {
+        let undo = pos.make_move(mv);
+        count += perft(pos, depth - 1);
+        pos.unmake_move(mv, &undo);
+    }
+    count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::Game;
+
+    fn start_pos() -> Position {
+        Position::from_game(&Game::new())
+    }
+
+    #[test]
+    fn perft_starting_position() {
+        let mut pos = start_pos();
+        assert_eq!(perft(&mut pos, 1), 20);
+        assert_eq!(perft(&mut pos, 2), 400);
+        assert_eq!(perft(&mut pos, 3), 8_902);
+    }
+
+    #[test]
+    fn perft_kewrick_position() {
+        let mut game = Game::new();
+        game.from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1").unwrap();
+        let mut pos = Position::from_game(&game);
+        assert_eq!(perft(&mut pos, 1), 48);
+        assert_eq!(perft(&mut pos, 2), 2_039);
+    }
+
+    #[test]
+    fn perft_after_e4_e5() {
+        let mut game = Game::new();
+        game.make_move_uci("e2e4").unwrap();
+        game.make_move_uci("e7e5").unwrap();
+        let mut pos = Position::from_game(&game);
+        assert_eq!(perft(&mut pos, 1), 29);
+        assert_eq!(perft(&mut pos, 2), 835);
+        assert_eq!(perft(&mut pos, 3), 24_825);
+    }
+
+    #[test]
+    fn search_explores_more_than_one_thousand_nodes_at_depth_four() {
+        let cfg = EngineConfig { depth_limit: 4, time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let result = best_move(&Game::new(), &cfg);
+        assert!(result.best_move.is_some());
+        assert!(result.nodes > 1_000, "depth-4 search from start should explore >1000 nodes, got {}", result.nodes);
+    }
+
+    #[test]
+    fn search_finds_mate_in_one() {
+        let mut game = Game::new();
+        game.from_fen("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 0 4");
+        CFG_TEST_PRINT.store(true, std::sync::atomic::Ordering::Relaxed);
+        {
+            let mut p = Position::from_game(&game);
+            println!("eval root (white stm): {}", eval::evaluate(&p.board, p.side_to_move));
+            for mv in generate_legal_moves(&p) {
+                let uci = game_move_uci(&mv);
+                if uci == "h5f7" || uci == "h5f5" {
+                    let undo = p.make_move(&mv);
+                    println!("after {}: side={:?} in_check={} eval={} legal_moves={}",
+                        uci, p.side_to_move, p.in_check(),
+                        eval::evaluate(&p.board, p.side_to_move),
+                        generate_legal_moves(&p).len());
+                    p.unmake_move(&mv, &undo);
+                }
+            }
+        }
+        let cfg = EngineConfig { depth_limit: 2, time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let result = best_move(&game, &cfg);
+        assert!(result.best_move.is_some());
+        let uci = game.move_to_uci(&result.best_move.unwrap());
+        assert_eq!(uci, "h5f7", "engine must deliver Qxf7#, got {}", uci);
+    }
 }

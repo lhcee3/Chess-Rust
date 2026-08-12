@@ -168,6 +168,30 @@ impl Board {
         Board { pieces }
     }
 
+    pub fn from_fen(fen: &str) -> Board {
+        let mut pieces = [None; 64];
+        let placement = fen.split_whitespace().next().unwrap_or("");
+        let mut row_start = 56usize;
+        let mut sq = 56usize;
+        for ch in placement.chars() {
+            match ch {
+                '1'..='8' => sq += ch.to_digit(10).unwrap() as usize,
+                '/' => {
+                    row_start -= 8;
+                    sq = row_start;
+                }
+                _ => {
+                    if let Some(pt) = PieceType::from_char(ch) {
+                        let color = if ch.is_ascii_uppercase() { Color::White } else { Color::Black };
+                        pieces[sq] = Some(Piece { piece_type: pt, color });
+                    }
+                    sq += 1;
+                }
+            }
+        }
+        Board { pieces }
+    }
+
     pub fn get_piece(&self, rank: usize, file: usize) -> Option<Piece> {
         if rank < 8 && file < 8 {
             self.pieces[rank * 8 + file]

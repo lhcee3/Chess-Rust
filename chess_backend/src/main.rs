@@ -56,6 +56,10 @@ async fn get_token(req: &HttpRequest) -> Result<String, HttpResponse> {
 }
 
 async fn auth_middleware(req: &HttpRequest, data: &web::Data<AppState>) -> Result<UserCtx, HttpResponse> {
+    if chess_backend::auth::dev_mode_enabled() {
+        log::debug!("dev mode: no auth required");
+        return Ok(UserCtx { uid: "local".to_string(), email: String::new() });
+    }
     let token = get_token(req).await?;
     verify_token(&token, &data.firebase).await.map_err(|e| {
         HttpResponse::Unauthorized().json(ApiResponse {

@@ -101,6 +101,36 @@ impl Game {
         Ok(())
     }
 
+    pub fn from_fen(&mut self, fen: &str) -> Result<(), String> {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.len() < 4 {
+            return Err("FEN must have at least 4 fields".to_string());
+        }
+        self.board = Board::from_fen(parts[0]);
+        self.side_to_move = match parts[1] {
+            "w" => Color::White,
+            "b" => Color::Black,
+            _ => return Err("Invalid side to move in FEN".to_string()),
+        };
+        let cr = parts[2];
+        self.castling_rights = CastlingRights {
+            white_kingside: cr.contains('K'),
+            white_queenside: cr.contains('Q'),
+            black_kingside: cr.contains('k'),
+            black_queenside: cr.contains('q'),
+        };
+        self.en_passant_target = if parts[3] == "-" {
+            None
+        } else {
+            crate::board::algebraic_to_square(parts[3])
+        };
+        self.halfmove_clock = parts.get(4).and_then(|p| p.parse().ok()).unwrap_or(0);
+        self.fullmove_number = parts.get(5).and_then(|p| p.parse().ok()).unwrap_or(1);
+        self.move_history.clear();
+        self.status = GameStatus::Playing;
+        Ok(())
+    }
+
     pub fn make_move_uci(&mut self, uci: &str) -> Result<(), String> {
         let uci = uci.trim();
         if uci.len() < 4 {
