@@ -5,5 +5,5 @@ pub mod ordering;
 pub mod search;
 pub mod time;
 
-pub use search::{best_move, analyze, EngineConfig, SearchResult, AnalysisResult, Position};
+pub use search::{best_move, EngineConfig, SearchResult, Position};
 pub use tt::TranspositionTable;
