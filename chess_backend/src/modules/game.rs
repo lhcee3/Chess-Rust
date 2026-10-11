@@ -23,7 +23,7 @@ pub struct Game {
     pub fullmove_number: u32,
     pub move_history: Vec<Move>,
     pub status: GameStatus,
-    pub ai_side: Option<Color>,
+    pub engine_side: Option<Color>,
     pub engine_config: EngineConfig,
 }
 
@@ -38,7 +38,7 @@ impl Game {
             fullmove_number: 1,
             move_history: Vec::new(),
             status: GameStatus::Playing,
-            ai_side: Some(Color::Black),
+            engine_side: Some(Color::Black),
             engine_config: EngineConfig::default(),
         }
     }
@@ -342,11 +342,13 @@ impl Game {
             },
             "legalMoves": legal_ucis,
             "moveHistory": self.move_history.iter().map(|m| self.move_to_uci(m)).collect::<Vec<_>>(),
-            "aiSide": self.ai_side.map(|c| if c == Color::White { "white" } else { "black" }),
-            "myTurn": self.ai_side.map(|a| a != self.side_to_move).unwrap_or(true),
+            "engineSide": self.engine_side.map(|c| if c == Color::White { "white" } else { "black" }),
+            "myTurn": self.engine_side.map(|a| a != self.side_to_move).unwrap_or(true),
             "engine": {
-                "depth": self.engine_config.depth_limit,
-                "timeLimitMs": self.engine_config.time_limit_ms,
+                "moveDepth": self.engine_config.move_depth,
+                "moveTimeLimitMs": self.engine_config.move_time_limit_ms,
+                "analysisDepth": self.engine_config.analysis_depth,
+                "analysisTimeLimitMs": self.engine_config.analysis_time_limit_ms,
             },
         })
     }

@@ -12,6 +12,3 @@ pub mod engine {
 pub mod game {
     pub use crate::modules::game::*;
 }
-pub mod auth {
-    pub use crate::modules::auth::*;
-}

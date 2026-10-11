@@ -23,15 +23,24 @@ fn cfg_test_print() -> bool {
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    pub depth_limit: u8,
-    pub time_limit_ms: u64,
+    pub move_depth: u8,
+    pub move_time_limit_ms: u64,
+    pub analysis_depth: u8,
+    pub analysis_time_limit_ms: u64,
     pub use_quiescence: bool,
     pub use_transposition_table: bool,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        EngineConfig { depth_limit: 8, time_limit_ms: 2000, use_quiescence: true, use_transposition_table: true }
+        EngineConfig {
+            move_depth: 8,
+            move_time_limit_ms: 2000,
+            analysis_depth: 5,
+            analysis_time_limit_ms: 5000,
+            use_quiescence: true,
+            use_transposition_table: true,
+        }
     }
 }
 
@@ -254,11 +263,11 @@ pub fn best_move(game: &crate::game::Game, cfg: &EngineConfig) -> SearchResult {
 
     let mut tt = TranspositionTable::new(64);
     let mut ss = SearchStack::new();
-    let tm = TimeManager::new(cfg.time_limit_ms);
+    let tm = TimeManager::new(cfg.move_time_limit_ms);
     let mut total_nodes = 0u64;
     let mut best = legal[0];
     let mut best_score = 0;
-    let max_depth = cfg.depth_limit.min(MAX_PLY as u8);
+    let max_depth = cfg.move_depth.min(MAX_PLY as u8);
 
     for depth in 1..=max_depth {
         reset_history(&mut ss);
@@ -269,7 +278,7 @@ pub fn best_move(game: &crate::game::Game, cfg: &EngineConfig) -> SearchResult {
             let undo = pos.make_move(mv);
             if !pos.in_check() {
                 let score = -alpha_beta(&mut pos, depth as i8 - 1, -beta, -alpha, 1, &mut ss, &mut tt, &tm, &mut total_nodes, cfg);
-                if cfg_test_print() && depth == cfg.depth_limit {
+                if cfg_test_print() && depth == cfg.move_depth {
                     println!("  {} -> {}", game_move_uci(mv), score);
                 }
                 if score > alpha {
@@ -293,6 +302,121 @@ pub fn best_move(game: &crate::game::Game, cfg: &EngineConfig) -> SearchResult {
         nps: (total_nodes * 1000) / elapsed,
         time_ms: elapsed,
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalysisResult {
+    pub played_uci: String,
+    pub classification: String,
+    pub played_score_cp: i32,
+    pub best_score_cp: i32,
+    pub loss_cp: i32,
+    pub best_move: Option<String>,
+    pub alternatives: Vec<String>,
+    pub reason_codes: Vec<String>,
+    pub engine_depth: u8,
+    pub nodes: u64,
+    pub nps: u64,
+    pub time_ms: u64,
+}
+
+pub fn analyze(game: &crate::game::Game, played_uci: &str, cfg: &EngineConfig) -> Option<AnalysisResult> {
+    let mut pos = Position::from_game(game);
+    let legal = generate_legal_moves(&pos);
+    if legal.is_empty() {
+        return None;
+    }
+    let played = legal.iter().copied().find(|m| game.move_to_uci(m) == played_uci)?;
+
+    let mut tt = TranspositionTable::new(32);
+    let mut ss = SearchStack::new();
+    let tm = TimeManager::new(cfg.analysis_time_limit_ms);
+    let mut nodes = 0u64;
+    let max_depth = cfg.analysis_depth.min(MAX_PLY as u8).max(1);
+
+    // Full-window score per root move so each played/alternative score is exact.
+    let mut scores: Vec<(Move, i32)> = legal.iter().map(|m| (*m, 0)).collect();
+    let mut reached_depth = 0u8;
+
+    for depth in 1..=max_depth {
+        reset_history(&mut ss);
+        let mut completed = true;
+        for entry in scores.iter_mut() {
+            if tm.hard_exceeded() { completed = false; break; }
+            let mv = entry.0;
+            let undo = pos.make_move(&mv);
+            let score = -alpha_beta(&mut pos, depth as i8 - 1, -MATE_SCORE, MATE_SCORE, 1, &mut ss, &mut tt, &tm, &mut nodes, cfg);
+            pos.unmake_move(&mv, &undo);
+            entry.1 = score;
+        }
+        reached_depth = depth;
+        if !completed || tm.soft_exceeded() {
+            break;
+        }
+    }
+
+    let mut best = scores[0];
+    for &(m, s) in &scores {
+        if s > best.1 { best = (m, s); }
+    }
+    let played_score = scores.iter().find(|(m, _)| *m == played).map(|(_, s)| *s).unwrap_or(0);
+    let best_score = best.1;
+    let loss = (best_score - played_score).max(0);
+
+    let classification = match loss {
+        0 => "best",
+        l if l <= 25 => "good",
+        l if l <= 75 => "inaccuracy",
+        l if l <= 200 => "mistake",
+        _ => "blunder",
+    }.to_string();
+
+    let mut ordered = scores.clone();
+    ordered.sort_by(|a, b| b.1.cmp(&a.1));
+    let alternatives: Vec<String> = ordered.iter()
+        .filter(|(m, _)| *m != best.0)
+        .take(3)
+        .map(|(m, _)| game.move_to_uci(m))
+        .collect();
+
+    // Heuristic reason codes describing the played move.
+    let mut reasons: Vec<String> = Vec::new();
+    if played.captured.is_some() { reasons.push("capture".to_string()); }
+    if played.promotion.is_some() { reasons.push("promotion".to_string()); }
+    if played.is_castle { reasons.push("king_safety".to_string()); }
+    let gives_check = {
+        let undo = pos.make_move(&played);
+        let c = pos.in_check();
+        pos.unmake_move(&played, &undo);
+        c
+    };
+    if gives_check { reasons.push("check".to_string()); }
+    let (from_rank, _) = rank_and_file(played.from);
+    let (to_rank, to_file) = rank_and_file(played.to);
+    if played.piece == PieceType::Pawn && (3..=4).contains(&to_rank) && (3..=4).contains(&to_file) {
+        reasons.push("center_control".to_string());
+    }
+    if matches!(played.piece, PieceType::Knight | PieceType::Bishop) && (from_rank == 0 || from_rank == 7) {
+        reasons.push("development".to_string());
+    }
+    if loss > 75 { reasons.push("loses_material".to_string()); }
+    if reasons.is_empty() { reasons.push("quiet_move".to_string()); }
+
+    let elapsed = tm.elapsed_ms().max(1);
+    Some(AnalysisResult {
+        played_uci: game.move_to_uci(&played),
+        classification,
+        played_score_cp: played_score,
+        best_score_cp: best_score,
+        loss_cp: loss,
+        best_move: Some(game.move_to_uci(&best.0)),
+        alternatives,
+        reason_codes: reasons,
+        engine_depth: reached_depth,
+        nodes,
+        nps: (nodes * 1000) / elapsed,
+        time_ms: elapsed,
+    })
 }
 
 fn alpha_beta(
@@ -495,7 +619,7 @@ mod tests {
 
     #[test]
     fn search_explores_more_than_one_thousand_nodes_at_depth_four() {
-        let cfg = EngineConfig { depth_limit: 4, time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let cfg = EngineConfig { move_depth: 4, move_time_limit_ms: 5000, analysis_depth: 5, analysis_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
         let result = best_move(&Game::new(), &cfg);
         assert!(result.best_move.is_some());
         assert!(result.nodes > 1_000, "depth-4 search from start should explore >1000 nodes, got {}", result.nodes);
@@ -521,7 +645,7 @@ mod tests {
                 }
             }
         }
-        let cfg = EngineConfig { depth_limit: 2, time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let cfg = EngineConfig { move_depth: 2, move_time_limit_ms: 5000, analysis_depth: 5, analysis_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
         let result = best_move(&game, &cfg);
         assert!(result.best_move.is_some());
         let uci = game.move_to_uci(&result.best_move.unwrap());
