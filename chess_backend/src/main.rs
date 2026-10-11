@@ -257,9 +257,13 @@ async fn main() -> std::io::Result<()> {
         firebase,
     });
 
-    log::info!("Starting chess server on http://127.0.0.1:8080");
+    log::info!("Starting chess server on http://0.0.0.0:8080");
     log::info!("Engine: local alpha-beta (depth 8, 2s)");
-    log::info!("Set FIREBASE_API_KEY and FIREBASE_PROJECT_ID in .env for auth");
+    if chess_backend::auth::dev_mode_enabled() {
+        log::info!("Auth: disabled (local play). Set AUTH_REQUIRED=true with FIREBASE_API_KEY to require sign-in");
+    } else {
+        log::info!("Auth: required (Firebase). Unset AUTH_REQUIRED for local play");
+    }
 
     HttpServer::new(move || {
         App::new()
@@ -276,8 +280,8 @@ async fn main() -> std::io::Result<()> {
                     .route("/config", web::post().to(config))
             )
     })
-    .bind("127.0.0.1:8080")?
-    .bind("127.0.0.1:8090")?
+    .bind("0.0.0.0:8080")?
+    .bind("0.0.0.0:8090")?
     .run()
     .await
 }

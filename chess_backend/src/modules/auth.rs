@@ -20,9 +20,16 @@ pub struct UserCtx {
     pub email: String,
 }
 
+pub fn auth_required() -> bool {
+    let requested = std::env::var("AUTH_REQUIRED")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    let has_key = !std::env::var("FIREBASE_API_KEY").unwrap_or_default().trim().is_empty();
+    requested && has_key
+}
+
 pub fn dev_mode_enabled() -> bool {
-    let api_key = std::env::var("FIREBASE_API_KEY").unwrap_or_default();
-    api_key.trim().is_empty()
+    !auth_required()
 }
 
 pub async fn verify_token(id_token: &str, config: &FirebaseConfig) -> Result<UserCtx, String> {
