@@ -3,7 +3,7 @@ use actix_web::{web, App, HttpResponse, HttpServer, middleware};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use chess_backend::game::{Game, GameStatus};
-use chess_backend::engine::{best_move, analyze};
+use chess_backend::engine::{best_move};
 
 struct AppState {
     game: Mutex<Game>,
@@ -24,14 +24,7 @@ struct GameConfigRequest {
 }
 
 #[derive(Deserialize)]
-struct AnalyzeRequest {
-    #[allow(dead_code)]
-    game_id: Option<String>,
-    fen_before: String,
-    uci: String,
-    depth: Option<u8>,
-    time_limit_ms: Option<u64>,
-}
+
 
 #[derive(Serialize)]
 struct ApiResponse {
@@ -157,48 +150,6 @@ async fn engine_move(data: web::Data<AppState>) -> HttpResponse {
 /// Reviews the human's move against the best alternatives. Reconstructs the
 /// position from `fen_before` on a throwaway game and never touches the live
 /// game, so it can run for longer without affecting normal play.
-async fn analyze_move(data: web::Data<AppState>, body: web::Json<AnalyzeRequest>) -> HttpResponse {
-    let mut cfg = { data.game.lock().unwrap().engine_config.clone() };
-    if let Some(d) = body.depth { cfg.analysis_depth = d; }
-    if let Some(t) = body.time_limit_ms { cfg.analysis_time_limit_ms = t; }
-
-    let mut game = Game::new();
-    if let Err(e) = game.from_fen(&body.fen_before) {
-        return bad(&format!("Invalid fen_before: {}", e));
-    }
-    let uci = body.uci.clone();
-
-    let result = match tokio::task::spawn_blocking(move || analyze(&game, &uci, &cfg)).await {
-        Ok(r) => r,
-        Err(e) => return HttpResponse::InternalServerError().json(ApiResponse {
-            ok: false, message: None, error: Some(format!("Analysis task failed: {}", e)),
-        }),
-    };
-
-    match result {
-        Some(a) => HttpResponse::Ok().json(json!({
-            "ok": true,
-            "uci": a.played_uci,
-            "classification": a.classification,
-            "playedScoreCp": a.played_score_cp,
-            "bestScoreCp": a.best_score_cp,
-            "lossCp": a.loss_cp,
-            "bestMove": a.best_move,
-            "alternatives": a.alternatives,
-            "reasonCodes": a.reason_codes,
-            "engineDepth": a.engine_depth,
-            "nodes": a.nodes,
-            "nps": a.nps,
-            "timeMs": a.time_ms,
-        })),
-        None => HttpResponse::Ok().json(json!({
-            "ok": false,
-            "uci": body.uci,
-            "error": "Move could not be analyzed in this position",
-        })),
-    }
-}
-
 async fn new_game(data: web::Data<AppState>, body: web::Json<GameConfigRequest>) -> HttpResponse {
     let mut game = Game::new();
     apply_config(&mut game, &body);
@@ -244,7 +195,6 @@ async fn main() -> std::io::Result<()> {
                     .route("/game", web::get().to(get_game))
                     .route("/move", web::post().to(make_move))
                     .route("/engine-move", web::post().to(engine_move))
-                    .route("/analyze-move", web::post().to(analyze_move))
                     .route("/new-game", web::post().to(new_game))
                     .route("/config", web::post().to(config))
             )
