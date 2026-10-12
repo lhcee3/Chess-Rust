@@ -347,8 +347,6 @@ impl Game {
             "engine": {
                 "moveDepth": self.engine_config.move_depth,
                 "moveTimeLimitMs": self.engine_config.move_time_limit_ms,
-                "analysisDepth": self.engine_config.analysis_depth,
-                "analysisTimeLimitMs": self.engine_config.analysis_time_limit_ms,
             },
         })
     }

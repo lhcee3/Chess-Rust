@@ -19,12 +19,7 @@ struct GameConfigRequest {
     engine_side: Option<String>,
     depth: Option<u8>,
     time_limit_ms: Option<u64>,
-    analysis_depth: Option<u8>,
-    analysis_time_limit_ms: Option<u64>,
 }
-
-#[derive(Deserialize)]
-
 
 #[derive(Serialize)]
 struct ApiResponse {
@@ -54,8 +49,6 @@ fn apply_config(game: &mut Game, body: &GameConfigRequest) {
     apply_engine_side(game, body.engine_side.as_deref());
     if let Some(d) = body.depth { game.engine_config.move_depth = d; }
     if let Some(t) = body.time_limit_ms { game.engine_config.move_time_limit_ms = t; }
-    if let Some(d) = body.analysis_depth { game.engine_config.analysis_depth = d; }
-    if let Some(t) = body.analysis_time_limit_ms { game.engine_config.analysis_time_limit_ms = t; }
 }
 
 async fn index() -> HttpResponse {
@@ -147,9 +140,6 @@ async fn engine_move(data: web::Data<AppState>) -> HttpResponse {
     }
 }
 
-/// Reviews the human's move against the best alternatives. Reconstructs the
-/// position from `fen_before` on a throwaway game and never touches the live
-/// game, so it can run for longer without affecting normal play.
 async fn new_game(data: web::Data<AppState>, body: web::Json<GameConfigRequest>) -> HttpResponse {
     let mut game = Game::new();
     apply_config(&mut game, &body);
@@ -181,7 +171,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     log::info!("Starting chess server on http://0.0.0.0:8080");
-    log::info!("Engine: local alpha-beta (move depth 8/2s, analysis depth 5/5s)");
+    log::info!("Engine: local alpha-beta (move depth 8/2s)");
     log::info!("Mode: local play (no auth, single game)");
 
     HttpServer::new(move || {

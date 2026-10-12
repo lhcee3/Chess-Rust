@@ -25,8 +25,6 @@ fn cfg_test_print() -> bool {
 pub struct EngineConfig {
     pub move_depth: u8,
     pub move_time_limit_ms: u64,
-    pub analysis_depth: u8,
-    pub analysis_time_limit_ms: u64,
     pub use_quiescence: bool,
     pub use_transposition_table: bool,
 }
@@ -36,8 +34,6 @@ impl Default for EngineConfig {
         EngineConfig {
             move_depth: 8,
             move_time_limit_ms: 2000,
-            analysis_depth: 5,
-            analysis_time_limit_ms: 5000,
             use_quiescence: true,
             use_transposition_table: true,
         }
@@ -504,7 +500,7 @@ mod tests {
 
     #[test]
     fn search_explores_more_than_one_thousand_nodes_at_depth_four() {
-        let cfg = EngineConfig { move_depth: 4, move_time_limit_ms: 5000, analysis_depth: 5, analysis_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let cfg = EngineConfig { move_depth: 4, move_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
         let result = best_move(&Game::new(), &cfg);
         assert!(result.best_move.is_some());
         assert!(result.nodes > 1_000, "depth-4 search from start should explore >1000 nodes, got {}", result.nodes);
@@ -530,7 +526,7 @@ mod tests {
                 }
             }
         }
-        let cfg = EngineConfig { move_depth: 2, move_time_limit_ms: 5000, analysis_depth: 5, analysis_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
+        let cfg = EngineConfig { move_depth: 2, move_time_limit_ms: 5000, use_quiescence: true, use_transposition_table: true };
         let result = best_move(&game, &cfg);
         assert!(result.best_move.is_some());
         let uci = game.move_to_uci(&result.best_move.unwrap());
